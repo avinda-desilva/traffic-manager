@@ -95,15 +95,20 @@ const RULES = [
   ["touch", "Swipe to move, pinch to zoom, double-tap to see the whole board."],
   ["keys", "Space starts a shift or shuts every gate. P pauses."],
 ];
-const guide = `<details class="tm-guide"><summary>How to play</summary><ul class="tm-rules">${RULES.map(([name, text]) => `<li>${name ? icon(name) : strike}<span>${text}</span></li>`).join("")}</ul></details>`;
-
-// The card: score, title and strikes along the top, what's next along the
-// bottom, and a bar that blinks over the bottom while a road is jammed.
-const corner = (name, text, extra = "") => `<span class="iso-plate-corner" data-corner="${name}"${extra}>${text}</span>`;
-const body = `<figure class="iso-figure"><div class="iso-plate"><div class="iso-plate-corners" aria-hidden="true">${corner("fig", "Score: 0", " data-score")}${corner("title", "Traffic manager")}${corner("strikes", "", " data-strikes")}${corner("readout", "Tap or press Space to start a shift", " data-readout")}</div><div class="tm-stage" tabindex="0" role="application" aria-roledescription="game" aria-label="Traffic manager. Tap a road to open or shut the gate on it. Space starts a shift or shuts every gate. P pauses.">${figure}</div><div class="tm-alert" data-alert hidden></div><p class="tm-live" aria-live="polite"></p></div>${guide}</figure>`;
+// The game fills the screen: the board edge to edge, a header floating over
+// its top (score, title with the info button, strikes) and a footer over its
+// bottom (the jam bar and what comes next). Neither moves with the camera.
+// The info button opens How to play over everything; a tap anywhere closes it.
+const rules = `<ul class="tm-rules">${RULES.map(([name, text]) => `<li>${name ? icon(name) : strike}<span>${text}</span></li>`).join("")}</ul>`;
+const INFO = `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7.3v4.2"/><circle class="tm-info-dot" cx="8" cy="5" r=".75"/></svg>`;
+const header = `<header class="tm-bar"><span class="tm-score" data-score>Score: 0</span><span class="tm-title">Traffic manager<button class="tm-info" type="button" aria-label="How to play" aria-haspopup="dialog" aria-controls="tm-help">${INFO}</button></span><span class="tm-strikes" data-strikes aria-hidden="true"></span></header>`;
+const footer = `<footer class="tm-foot"><div class="tm-alert" data-alert hidden></div><span class="tm-next" data-readout>Tap or press Space to start a shift</span></footer>`;
+const help = `<div class="tm-overlay" id="tm-help" role="dialog" aria-modal="true" aria-label="How to play" tabindex="-1" hidden><div class="tm-sheet"><div class="tm-sheet-head">How to play</div>${rules}<div class="tm-sheet-foot">Tap anywhere to close</div></div></div>`;
+const stageLabel = "Traffic manager. Tap a road to open or shut the gate on it. Space starts a shift or shuts every gate. P pauses.";
+const body = `<div class="tm-game"><div class="tm-stage" tabindex="0" role="application" aria-roledescription="game" aria-label="${stageLabel}">${figure}</div>${header}${footer}${help}<p class="tm-live" aria-live="polite"></p></div>`;
 
 const CSS = `
-.iso{--tm-asphalt:#171717;--tm-paint:#2e2e2e;--tm-stripe:#3a3a3a;--tm-stop:var(--anatomy-red);--tm-go:var(--anatomy-green)}
+.iso{--tm-asphalt:#171717;--tm-paint:#2e2e2e;--tm-stripe:#3a3a3a;--tm-stop:var(--anatomy-red);--tm-go:var(--anatomy-green);--tm-type:var(--anatomy-mono)}
 .iso[data-theme="light"]{--tm-asphalt:#ececea;--tm-paint:#ffffff;--tm-stripe:#c4c4c7}
 .tm-road>.iso-top,.tm-lot>.iso-top{fill:var(--tm-asphalt)}
 .tm-paint>.iso-fill{fill:var(--tm-paint)}
@@ -121,31 +126,40 @@ const CSS = `
 .tm-arrow>.iso-top{fill:color-mix(in srgb,var(--tm-stop) 72%,#fff)}
 .tm-arrow>.iso-line{stroke:color-mix(in srgb,var(--tm-stop) 55%,var(--anatomy-hi))}
 .tm-crash{fill:none;stroke:var(--tm-stop);stroke-width:1.2}
-.tm-stage{position:relative;overflow:hidden;--tm-fade:linear-gradient(#0000,#000 22px,#000 calc(100% - 22px),#0000),linear-gradient(90deg,#0000,#000 22px,#000 calc(100% - 22px),#0000);-webkit-mask-image:var(--tm-fade);-webkit-mask-composite:source-in;mask-image:var(--tm-fade);mask-composite:intersect}
-.tm-back{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;pointer-events:none}
-.tm-front{position:relative}
 .tm-shadows{filter:blur(9px);opacity:var(--anatomy-halo-opacity);transform:translateY(3px)}
 .tm-shadows>path{fill:var(--anatomy-halo)}
-.tm-stage{outline:none;cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
-.tm-stage:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:6px}
-.tm-stage[data-input="pointer"]:focus-visible{outline:none}
-.tm-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 body.iso{background:var(--anatomy-card)}
-.iso-plate{overflow:hidden;box-shadow:none;padding-bottom:92px}
-.iso-plate-corners{z-index:2}
-.iso-plate-corner[data-corner="title"]{left:50%;right:auto;transform:translateX(-50%)}
-.iso-plate-corner[data-corner="strikes"]{top:0;right:0;text-transform:uppercase;letter-spacing:.3em;margin-right:-.3em}
-.iso-plate-corner[data-corner="readout"]{left:0;right:0;text-align:center;white-space:normal;line-height:1.4}
-.tm-alert{position:absolute;z-index:2;left:20px;right:20px;bottom:46px;padding:7px 10px;text-align:center;font-family:var(--anatomy-mono);font-size:10.5px;line-height:1.4;letter-spacing:.06em;text-transform:uppercase;color:var(--tm-stop);border:1px solid color-mix(in srgb,var(--tm-stop) 55%,transparent);background:color-mix(in srgb,var(--tm-stop) 9%,var(--anatomy-card));animation:tm-blink 1s steps(1,end) infinite}
+.iso-page{width:auto;margin:0}
+.tm-game{position:fixed;inset:0;overflow:hidden;background:var(--anatomy-card);--anatomy-paper:var(--anatomy-card)}
+.tm-stage{position:absolute;inset:0;overflow:hidden;outline:none;cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+.tm-stage .iso-svg{position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden}
+.tm-back{transform-origin:0 0;will-change:transform;pointer-events:none}
+.tm-stage:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:-8px}
+.tm-stage[data-input="pointer"]:focus-visible{outline:none}
+.tm-bar,.tm-foot{position:absolute;left:0;right:0;z-index:3;pointer-events:none;font-family:var(--tm-type);font-size:10.5px;line-height:1;letter-spacing:.04em;color:var(--anatomy-muted)}
+.tm-bar{top:0;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:max(18px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) 30px max(20px,env(safe-area-inset-left));background:linear-gradient(var(--anatomy-card) 45%,color-mix(in srgb,var(--anatomy-card) 0%,transparent))}
+.tm-score{color:var(--anatomy-text);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tm-title{display:inline-flex;align-items:center;text-transform:uppercase;letter-spacing:.1em;white-space:nowrap}
+.tm-strikes{justify-self:end;color:var(--anatomy-text);letter-spacing:.3em;margin-right:-.3em;white-space:nowrap}
+.tm-info{pointer-events:auto;display:inline-grid;place-items:center;width:36px;height:36px;margin:-12px -12px -12px -4px;padding:0;border:0;border-radius:50%;background:none;color:var(--anatomy-muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.tm-info svg{width:15px;height:15px}
+.tm-info circle,.tm-info path{fill:none;stroke:currentColor;stroke-width:1.1;stroke-linecap:round}
+.tm-info .tm-info-dot{fill:currentColor;stroke:none}
+.tm-info:hover,.tm-info:focus-visible{color:var(--anatomy-hi);outline:none}
+.tm-foot{bottom:0;display:grid;justify-items:center;gap:12px;padding:30px max(16px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));background:linear-gradient(color-mix(in srgb,var(--anatomy-card) 0%,transparent),var(--anatomy-card) 55%)}
+.tm-next{color:var(--anatomy-text);text-align:center;line-height:1.4;font-variant-numeric:tabular-nums}
+.tm-alert{width:min(560px,100%);padding:7px 10px;text-align:center;line-height:1.4;letter-spacing:.06em;text-transform:uppercase;color:var(--tm-stop);border:1px solid color-mix(in srgb,var(--tm-stop) 55%,transparent);background:color-mix(in srgb,var(--tm-stop) 9%,var(--anatomy-card));animation:tm-blink 1s steps(1,end) infinite}
 .tm-alert[hidden]{display:none}
 @keyframes tm-blink{50%{opacity:.3}}
-.tm-guide{margin-top:16px;border-top:1px solid var(--anatomy-faint);color:var(--anatomy-muted);font-size:13px;line-height:1.5}
-.tm-guide>summary{display:flex;align-items:center;gap:10px;padding:14px 0;list-style:none;cursor:pointer;color:var(--anatomy-text);font-family:var(--anatomy-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase}
-.tm-guide>summary::-webkit-details-marker{display:none}
-.tm-guide>summary::before{content:"";width:5px;height:5px;margin:0 2px;border-right:1px solid currentColor;border-bottom:1px solid currentColor;transform:rotate(-45deg);transition:transform .2s}
-.tm-guide[open]>summary::before{transform:rotate(45deg)}
-.tm-guide>summary:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:4px}
-.tm-rules{display:grid;gap:10px;margin:0;padding:0 0 16px;list-style:none}
+.tm-overlay{position:absolute;inset:0;z-index:10;display:grid;place-items:center;padding:max(20px,env(safe-area-inset-top)) 16px max(20px,env(safe-area-inset-bottom));background:color-mix(in srgb,var(--anatomy-card) 90%,transparent);cursor:pointer;outline:none;animation:tm-show .2s ease-out}
+.tm-overlay[hidden]{display:none}
+@keyframes tm-show{from{opacity:0}}
+.tm-sheet{width:min(440px,100%);max-height:100%;overflow:auto;padding:20px 22px 18px;background:var(--anatomy-card);box-shadow:0 0 0 1px var(--anatomy-mid);color:var(--anatomy-muted);font-size:13px;line-height:1.5}
+.tm-sheet-head,.tm-sheet-foot{font-family:var(--tm-type);font-size:10.5px;line-height:1;letter-spacing:.1em;text-transform:uppercase}
+.tm-sheet-head{margin-bottom:18px;color:var(--anatomy-text)}
+.tm-sheet-foot{margin-top:18px;text-align:center}
+.tm-rules{display:grid;gap:10px;margin:0;padding:0;list-style:none}
 .tm-rules li{display:grid;grid-template-columns:18px 1fr;gap:10px;align-items:start}
 .tm-icon{display:block;width:16px;height:16px;margin-top:2px}
 .tm-icon *{fill:none;stroke:var(--anatomy-hi);stroke-width:1.1;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
@@ -154,9 +168,9 @@ body.iso{background:var(--anatomy-card)}
 .tm-icon .tm-icon-stop{fill:var(--tm-stop);stroke:var(--anatomy-lo)}
 .tm-icon .tm-icon-red{stroke:var(--tm-stop)}
 .tm-icon .tm-icon-arrow{fill:var(--tm-stop);stroke:color-mix(in srgb,var(--tm-stop) 55%,var(--anatomy-hi))}
-.tm-icon-x{margin-top:0;color:var(--anatomy-text);font-family:var(--anatomy-mono);font-size:11px;line-height:18px;letter-spacing:.1em;text-align:center}
-@media (max-width:560px){.iso-plate{padding-bottom:96px}.iso-plate .tm-stage{width:116%;margin:0 -8%}.tm-alert{left:12px;right:12px;bottom:44px}}
-@media (prefers-reduced-motion:reduce){.tm-strike,.tm-pip{transition:none}.tm-pip[data-jam],.tm-alert{animation:none}.tm-guide>summary::before{transition:none}}
+.tm-icon-x{margin-top:0;color:var(--anatomy-text);font-family:var(--tm-type);font-size:11px;line-height:18px;letter-spacing:.1em;text-align:center}
+.tm-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (prefers-reduced-motion:reduce){.tm-strike,.tm-pip{transition:none}.tm-pip[data-jam],.tm-alert,.tm-overlay{animation:none}}
 `;
 
 const data = {
@@ -179,7 +193,10 @@ const script = [
 ].join("\n");
 
 for (const theme of ["light", "dark"]) {
-  const html = k.pageHtml({ title: "Traffic manager", theme, body, script, width: 900 }).replace("</style>", `${CSS}</style>`);
+  const html = k
+    .pageHtml({ title: "Traffic manager", theme, body, script, width: 900 })
+    .replace("</style>", `${CSS}</style>`)
+    .replace('content="width=device-width, initial-scale=1"', 'content="width=device-width, initial-scale=1, viewport-fit=cover"');
   const file = theme === "light" ? "game/traffic-manager.html" : "game/traffic-manager-dark.html";
   writeFileSync(join(HERE, file), html);
   console.log("wrote", file, `${Math.round(html.length / 1024)} KB`);

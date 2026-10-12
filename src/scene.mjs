@@ -364,9 +364,10 @@ export const offsetOf = (tile) => [tile.x * PARTS.U, tile.y * PARTS.U];
 export const placeOf = (tile) => k.translateAlong(P, [...offsetOf(tile), 0]);
 export const shiftBox = (box, [dx, dy]) => [box[0] + dx, box[1] + dx, box[2] + dy, box[3] + dy, box[4], box[5]];
 
-// The viewBox that frames every tile, with the margins of the one-tile fit.
-// One tile gives exactly the card's own 0 0 WIDTH HEIGHT.
-export function viewFor(tiles) {
+// Where the board sits in the drawing's own units: the screen box around
+// every tile's plate (feet included) and the first tile's shop. The page fits
+// its camera to this box, whatever the shape of the screen.
+export function boundsOf(tiles) {
   const points = tiles.flatMap((tile) => {
     const [dx, dy] = offsetOf(tile);
     const plate = { ...PLATE, x: PLATE.x + dx, y: PLATE.y + dy };
@@ -376,13 +377,7 @@ export function viewFor(tiles) {
   const flat = points.map(at);
   const xs = flat.map(([x]) => x);
   const ys = flat.map(([, y]) => y);
-  const [left, right, up, down] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const pad = 22;
-  const scale = Math.max(1, (right - left) / (WIDTH - 2 * pad), (down - up) / (HEIGHT - 2 * pad));
-  const w = WIDTH * scale;
-  const h = HEIGHT * scale;
-  const round = (value) => Math.round(value * 100) / 100;
-  return [round((left + right) / 2 - w / 2), round((up + down) / 2 - h / 2), round(w), round(h)];
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
 function lamppost([x, y, toward], index) {

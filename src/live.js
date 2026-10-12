@@ -17,11 +17,15 @@ const readout = document.querySelector("[data-readout]");
 const scoreboard = document.querySelector("[data-score]");
 const strikeboard = document.querySelector("[data-strikes]");
 const alarm = document.querySelector("[data-alert]");
+const header = document.querySelector(".tm-bar");
+const help = document.querySelector(".tm-overlay");
+const info = document.querySelector(".tm-info");
 const announcer = document.querySelector(".tm-live");
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 const BEST_KEY = "traffic-manager-best";
 const NAMES = Object.fromEntries(M.APPROACHES.map((approach) => [approach.id, approach.name]));
-const HOME = [0, 0, SCENE.WIDTH, SCENE.HEIGHT];
+const START = [0, 0, SCENE.WIDTH, SCENE.HEIGHT];
+const ZOOM = 3;
 const ARRIVE = 1.2;
 const CAMERA = 0.28;
 const ARROW = PARTS.arrowSvg(P);
@@ -50,9 +54,10 @@ let carry = 0;
 let visible = false;
 let order = [];
 let pips = [...svg.querySelectorAll(".tm-pip")];
-let view = [...HOME];
-let aim = [...HOME];
-let painted = [...HOME];
+let view = [...START];
+let aim = [...START];
+let painted = [...START];
+let fit = [...START];
 let warned = new Set();
 const fx = [];
 
@@ -187,7 +192,7 @@ function resetBoard() {
   arriving.length = 0;
   order = [];
   drawTile(game.tiles[0]);
-  aimAt(SCENE.viewFor(game.tiles));
+  aimAt(refit());
 }
 
 function syncVehicles() {
@@ -327,17 +332,33 @@ function moveCamera(dt) {
   showView();
 }
 
+// The whole board, fitted between the header and the footer in the shape of
+// the screen: 100% zoom. The view always has the screen's shape, so the
+// drawing fills it edge to edge with nothing letterboxed.
+function refit() {
+  const { width, height } = stage.getBoundingClientRect();
+  if (!width || !height) return fit;
+  const [left, up, right, down] = SCENE.boundsOf(game.tiles);
+  const top = header.getBoundingClientRect().height;
+  const bottom = height - readout.getBoundingClientRect().top + 44;
+  const side = 12;
+  const scale = Math.min((width - 2 * side) / (right - left), (height - top - bottom) / (down - up));
+  fit = [(left + right) / 2 - width / 2 / scale, (up + down) / 2 - (top + (height - top - bottom) / 2) / scale, width / scale, height / scale];
+  return fit;
+}
+
 // Touch: one finger swipes the board and two pinch it, about the point
-// between them; a touch that barely moves is a tap. The view can't drift off
-// the board or zoom past a fifth of the card.
+// between them; a touch that barely moves is a tap. Zoom runs from the whole
+// board (100%) to ZOOM times closer, and the view stays within the whole
+// board's frame, so at 100% the board holds still.
 const gesture = { points: new Map(), anchor: null, tap: null, lastTap: null };
 const SLOP = 10;
 function clampView([x, y, w]) {
-  const fit = SCENE.viewFor(game.tiles);
-  const width = Math.min(Math.max(w, SCENE.WIDTH / 5), fit[2] * 1.25);
-  const height = (width * SCENE.HEIGHT) / SCENE.WIDTH;
-  const cx = Math.min(Math.max(x + w / 2, fit[0]), fit[0] + fit[2]);
-  const cy = Math.min(Math.max(y + (w * SCENE.HEIGHT) / SCENE.WIDTH / 2, fit[1]), fit[1] + fit[3]);
+  const width = Math.min(Math.max(w, fit[2] / ZOOM), fit[2]);
+  const height = (width * fit[3]) / fit[2];
+  const h = (w * fit[3]) / fit[2];
+  const cx = Math.min(Math.max(x + w / 2, fit[0] + width / 2), fit[0] + fit[2] - width / 2);
+  const cy = Math.min(Math.max(y + h / 2, fit[1] + height / 2), fit[1] + fit[3] - height / 2);
   return [cx - width / 2, cy - height / 2, width, height];
 }
 function spreadOf() {
@@ -371,7 +392,7 @@ function tapAt(event) {
   gesture.lastTap = { x: event.clientX, y: event.clientY, t: now };
   if (!target && mode === "play" && before && now - before.t < 350 && Math.hypot(event.clientX - before.x, event.clientY - before.y) < 40) {
     gesture.lastTap = null;
-    aimAt(SCENE.viewFor(game.tiles));
+    aimAt(fit);
     run();
     return;
   }
@@ -444,7 +465,7 @@ function handleEvents(now) {
     if (event.type === "jam") say(`The ${entryName(game.lanes[event.lane])} jammed, strike ${game.strikes} of ${M.STRIKES}.`);
     if (event.type === "tile") {
       for (const tile of game.tiles) drawTile(tile, tile.index === event.index ? now : null);
-      aimAt(SCENE.viewFor(game.tiles));
+      aimAt(refit());
       say(`Tile ${event.index + 1} joins the board with every gate shut.`);
     }
     if (event.type === "over") {
@@ -635,8 +656,40 @@ new IntersectionObserver(
 document.addEventListener("visibilitychange", run);
 still.addEventListener("change", run);
 
+// How to play opens over everything from the info button; a tap anywhere, or
+// Escape, closes it. The shift keeps running behind it.
+function showHelp(open) {
+  help.hidden = !open;
+  if (open) help.focus({ preventScroll: true });
+  else stage.focus({ preventScroll: true });
+}
+info.addEventListener("click", () => showHelp(true));
+help.addEventListener("click", () => showHelp(false));
+help.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" || event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    showHelp(false);
+  }
+});
+
+// A new screen shape (a turned phone, a browser bar sliding away) gets a
+// fresh fit, keeping the zoom and the point in the middle of the view.
+addEventListener("resize", () => {
+  const zoom = fit[2] / view[2];
+  const centre = [view[0] + view[2] / 2, view[1] + view[3] / 2];
+  refit();
+  const w = fit[2] / zoom;
+  view = clampView([centre[0] - w / 2, centre[1] - fit[3] / zoom / 2, w]);
+  aim = [...view];
+  paint(view);
+  run();
+});
+
 // For the console and for scripted checks: the live game and the model.
 window.trafficManager = { model: M, game: () => game, start, run };
 
 demo();
+view = refit();
+aim = [...view];
+paint(view);
 render(performance.now(), 0);
