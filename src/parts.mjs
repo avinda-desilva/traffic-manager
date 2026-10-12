@@ -40,10 +40,14 @@ export const DESIGNS = {
 };
 export const heightOf = (kind) => Math.max(...DESIGNS[kind].map((part) => part.z + part.h));
 
-export function vehicleSvg(kind, x, y, th, P, { tone = "hi", lit = false } = {}) {
+// A vehicle's soft shadow on the road, as a path. The page draws the moving
+// ones together under everything that stands, with one blur.
+export const vehicleHaloOf = (kind, x, y, th, P) => k.extrude(rotate(k.roundedPlan(DESIGNS[kind].find((part) => part.body).plan, 4), x, y, th), 0, 0.1, P).fill;
+
+export function vehicleSvg(kind, x, y, th, P, { tone = "hi", lit = false, halo = true } = {}) {
   const parts = DESIGNS[kind];
   const body = parts.find((part) => part.body);
-  const out = [`<path class="iso-halo tm-halo" d="${k.extrude(rotate(k.roundedPlan(body.plan, 4), x, y, th), 0, 0.1, P).fill}"/>`];
+  const out = halo ? [`<path class="iso-halo tm-halo" d="${vehicleHaloOf(kind, x, y, th, P)}"/>`] : [];
   const centre = (part) => {
     const [[cx, cy]] = rotate([[part.plan.x + part.plan.w / 2, part.plan.y + part.plan.d / 2]], x, y, th);
     return [cx, cy, part.z];
@@ -129,7 +133,9 @@ function armParts(id, angle) {
   return { F, along, list: [...stripes, weight] };
 }
 
-function cabinetSvg(id, P, { go }) {
+// The cabinet's soft shadow on the kerb. It never moves, so the page draws it
+// with the ground instead of rebuilding it with the arm.
+export function gateHaloSvg(id, P) {
   const { at, dir, right } = gateFrame(id);
   const centre = at(-4.8, 0.3);
   const ring = [
@@ -138,9 +144,14 @@ function cabinetSvg(id, P, { go }) {
     [2.6, 2.6],
     [-2.6, 2.6],
   ].map(([s, q]) => [centre[0] + dir[0] * s + right[0] * q, centre[1] + dir[1] * s + right[1] * q]);
+  return `<path class="iso-halo" d="${k.extrude(ring, ISLAND_H, 0.1, P).fill}"/>`;
+}
+
+function cabinetSvg(id, P, { go }) {
+  const { at, dir, right } = gateFrame(id);
+  const centre = at(-4.8, 0.3);
   const plan = k.roundedPlan({ x: -2.6, y: -2.6, w: 5.2, d: 5.2, r: 0.7 }, 3).map(([s, q]) => [centre[0] + dir[0] * s + right[0] * q, centre[1] + dir[1] * s + right[1] * q]);
   const out = [];
-  out.push(`<path class="iso-halo" d="${k.extrude(ring, ISLAND_H, 0.1, P).fill}"/>`);
   out.push(k.solidSvg(k.extrude(plan, ISLAND_H, 1.2, P), { tone: "mid" }));
   const upper = k.roundedPlan({ x: -2.2, y: -2.2, w: 4.4, d: 4.4, r: 0.6 }, 3).map(([s, q]) => [centre[0] + dir[0] * s + right[0] * q, centre[1] + dir[1] * s + right[1] * q]);
   out.push(k.solidSvg(k.extrude(upper, ISLAND_H + 1.2, CABINET_TOP - ISLAND_H - 1.2, P, { bevel: 0.4 }), { tone: "mid", inner: k.lineSvg(k.ringSeam(upper, CABINET_TOP - 1.4, P), { tone: "faint" }) }));
@@ -201,7 +212,6 @@ export function strikeBoardSvg(strikes, P) {
   const out = [];
   const at = (point) => k.iso(point, P);
   const plinthTop = CABINET_Z + 1.4;
-  out.push(`<path class="iso-halo" d="${k.haloOf(k.insetPlan(PLINTH, -1.2), CABINET_Z, 0.1, P)}"/>`);
   out.push(k.solidSvg(k.slabOf(PLINTH, CABINET_Z, 1.4, P, 3, 0.4), { tone: "lo" }));
   out.push(k.lineSvg(k.planOutline(k.insetPlan(PLINTH, 1), plinthTop, P, 3), { tone: "faint" }));
   out.push(k.dotsSvg(k.corners(PLINTH, 1.6).map(([x, y]) => at([x, y, plinthTop])), { size: 0.4, tone: "lo" }));
@@ -242,4 +252,5 @@ export function strikeBoardSvg(strikes, P) {
   return out.join("");
 }
 
+export const strikeBoardHaloSvg = (P) => `<path class="iso-halo" d="${k.haloOf(k.insetPlan(PLINTH, -1.2), CABINET_Z, 0.1, P)}"/>`;
 export const strikeBoardBox = () => [PLINTH.x, PLINTH.x + PLINTH.w, PLINTH.y, PLINTH.y + PLINTH.d, 0, LID_Z + 1.2 + 2.3];

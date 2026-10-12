@@ -42,6 +42,9 @@ export const GROWTH = [
   [1, 2],
   [2, 2],
 ];
+// The vehicles through that bring each tile after the first.
+export const TILE_AT = [15, 40, 80, 130, 190, 260, 340, 430];
+export const nextTileAt = (game) => (game.tiles.length < GROWTH.length ? TILE_AT[game.tiles.length - 1] : null);
 
 export const KINDS = {
   car: { length: 4.5, width: 1.8, mass: 1300, v0: 10, a: 1.5, b: 2.0, T: 1.2, s0: 2, brake: 8 },
@@ -540,6 +543,8 @@ export function entryClear(game, id, kind) {
   });
 }
 
+// A newcomer has seen the first lamp on the way in: if it is red, they arrive
+// slow enough to stop for it comfortably, never already in the dilemma zone.
 function enter(game, id, kind) {
   const spec = KINDS[kind];
   const lane = game.lanes[id];
@@ -550,6 +555,7 @@ function enter(game, id, kind) {
     const gap = last.s - KINDS[last.kind].length - spec.length;
     v = Math.min(v0, Math.max(last.v, Math.sqrt(Math.max(0, 2 * spec.b * (gap - spec.s0)))));
   }
+  if (!game.tiles[lane.tiles[0]].open[lane.approach]) v = Math.min(v, Math.sqrt(2 * SAFE_BRAKE * 0.9 * (S_STOP - spec.length - STOP_SHORT)));
   game.vehicles.push({ id: game.nextId++, kind, lane, s: spec.length, v, v0, acc: 0, born: game.t, epoch: -1, obey: true, wreck: false });
 }
 
@@ -620,6 +626,7 @@ export function step(game, dt = STEP) {
   gates(game, dt);
   retire(game);
   judge(game, dt);
+  if (!game.demo && !game.over) while (nextTileAt(game) !== null && game.cleared >= nextTileAt(game)) addTile(game);
   if (game.demo) autopilot(game);
 }
 
@@ -640,6 +647,13 @@ export function alphaOf(game, vehicle) {
 }
 export const waitingOf = (game) =>
   game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.v < 0.5).length + laneList(game).reduce((sum, lane) => sum + game.backlog[lane.id].length, 0);
+// Who is held at one gate: stopped short of it, and, on the lane's first
+// tile, the queue off the board.
+export const waitingAt = (game, index, id) => {
+  const lane = laneOf(game, index, id);
+  const held = game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.lane === lane && vehicle.v < 0.5 && gateAhead(game, vehicle)?.tile.index === index).length;
+  return held + (lane.tiles[0] === index ? game.backlog[lane.id].length : 0);
+};
 export const queueOf = (game, id) => game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.lane.id === id && vehicle.v < 0.5).length + game.backlog[id].length;
 
 // A tile's box is clear when nothing is inside its stop lines and nobody on

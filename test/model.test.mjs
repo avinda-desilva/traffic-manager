@@ -223,3 +223,44 @@ test("a safe plan at every junction of a 2×2 board runs five minutes without a 
   assert.equal(game.strikes, 0);
   assert.ok(game.cleared > 80, `cleared ${game.cleared}`);
 });
+
+test("tiles join east, south, then fill toward a square as vehicles get through, and stop at nine", () => {
+  const game = M.quiet(M.createGame());
+  const added = [];
+  for (const at of M.TILE_AT) {
+    game.cleared = at - 1;
+    M.step(game);
+    const before = game.tiles.length;
+    game.cleared = at;
+    M.step(game);
+    assert.equal(game.tiles.length, before + 1, `a tile at ${at}`);
+    added.push(game.tiles.at(-1));
+  }
+  assert.deepEqual(added.map((tile) => [tile.col, tile.row]), M.GROWTH.slice(1));
+  assert.ok(game.events.filter((event) => event.type === "tile").length >= 1);
+  game.cleared = 10_000;
+  M.step(game);
+  assert.equal(game.tiles.length, M.GROWTH.length);
+  assert.equal(M.nextTileAt(game), null);
+});
+
+test("the demo never grows", () => {
+  const game = M.createGame({ seed: 1, demo: true });
+  game.cleared = 10_000;
+  run(game, 1);
+  assert.equal(game.tiles.length, 1);
+});
+
+test("the same seed plays the same shift as the board grows", () => {
+  const play = () => {
+    const game = M.createGame({ seed: 5 });
+    run(game, 90, (each) => {
+      M.autopilot(each);
+      if (each.t > 30 && each.tiles.length < 4) each.cleared = Math.max(each.cleared, M.nextTileAt(each));
+    });
+    return [game.tiles.length, game.cleared, game.strikes, game.vehicles.map((v) => `${v.lane.id}:${v.s.toFixed(6)}`).join()];
+  };
+  const first = play();
+  assert.equal(first[0], 4);
+  assert.deepEqual(play(), first);
+});

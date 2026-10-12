@@ -28,10 +28,12 @@ function asObject(name, source) {
 const demo = M.createGame({ seed: DEMO_SEED, demo: true });
 M.advance(demo, DEMO_LEAD);
 
+const first = demo.tiles[0];
+const ground = SCENE.tileGroundSvg(demo.tiles, first);
 const item = (key, svg, box) => ({ key, svg, box });
 const items = [
-  ...SCENE.props().map((prop) => item(prop.key, prop.svg, prop.box)),
-  ...M.IDS.map((id) => item(`gate-${id}`, PARTS.gateSvg(id, demo.tiles[0].arm[id], P, { go: demo.tiles[0].open[id] }), PARTS.gateBox(id, demo.tiles[0].arm[id]))),
+  ...SCENE.tileProps(first).map((prop) => item(prop.key, prop.svg, prop.box)),
+  ...M.IDS.map((id) => item(`gate-0-${id}`, PARTS.gateSvg(id, demo.tiles[0].arm[id], P, { go: demo.tiles[0].open[id] }), PARTS.gateBox(id, demo.tiles[0].arm[id]))),
   item("strikes", PARTS.strikeBoardSvg(0, P), PARTS.strikeBoardBox()),
   ...demo.vehicles.map((vehicle) => {
     const body = M.bodyOf(vehicle);
@@ -46,14 +48,27 @@ const sorted = SCENE.paintOrder(items, P)
   .join("");
 
 const LABEL =
-  "A model crossroads on a base plate. Two roads cross between four kerbed islands; a boom gate with a red or green lamp stands at each stop line, and a signal controller cabinet on the near island carries three strike lamps. Cars, vans and buses drive through when their gate is open and queue when it is shut.";
+  "A model crossroads on a base plate. Two roads cross between four kerbed islands; a boom gate with a red or green lamp stands at each stop line, and a signal controller cabinet on the near island carries three strike lamps. Cars, vans and buses drive through when their gate is open and queue when it is shut. As vehicles get through, more crossroads tiles join the board and the view pulls back to fit them.";
 
-const figure = k.figureSvg({
+// Two drawings stacked in one camera: the ground behind, painted once on its
+// own layer, and everything that moves or lights in front, repainted per frame.
+const back = k
+  .figureSvg({
+    width: SCENE.WIDTH,
+    height: SCENE.HEIGHT,
+    label: "",
+    className: "tm-back",
+    body: [`<g data-layer="ground"><g data-halos><g data-halo="0">${ground.halo}</g></g><g data-tile="0" data-sign='${ground.sign}'>${ground.body}</g></g>`],
+  })
+  .replace(/ role="img" aria-label=""/, ' aria-hidden="true"');
+const front = k.figureSvg({
   width: SCENE.WIDTH,
   height: SCENE.HEIGHT,
   label: LABEL,
-  body: [`<g data-layer="ground">${SCENE.groundSvg()}</g>`, `<g data-layer="sorted">${sorted}</g>`, `<g data-layer="fx"></g>`],
+  className: "tm-front",
+  body: [`<g data-layer="arriving"></g>`, `<g data-layer="pips"><g data-pips="0">${ground.pips}</g></g>`, `<g data-layer="shadows" class="tm-shadows"></g>`, `<g data-layer="sorted">${sorted}</g>`, `<g data-layer="fx"></g>`],
 });
+const figure = back + front;
 
 const kmh = (value) => Math.round(value * 3.6);
 const caption = [
@@ -62,6 +77,7 @@ const caption = [
   `The arm waits for its detector to clear and takes ${M.ARM_TIME} s to swing. Drivers trust the gates and don't watch the other road, so open both roads at once and they meet:`,
   `crashes are rigid-body impacts that conserve momentum, and wrecks slide on tyre friction (μ ${M.TYRE_GRIP}) until they stop.`,
   `${M.STRIKES} strikes end the shift. A crash is one; so is a queue of ${M.JAM} off the board that doesn't move for ${M.JAM_TIME} s, and again every ${M.JAM_TIME} s it stays. Demand climbs and swings between the roads every 80 s.`,
+  `At ${M.TILE_AT.slice(0, 3).join(", ")} vehicles through and on up to ${M.TILE_AT.at(-1)}, a new crossroads joins the board, up to ${M.GROWTH.length}; where two meet, the road runs straight on into the next junction.`,
 ].join(" ");
 
 const body = k.plateHtml({
@@ -92,14 +108,21 @@ const CSS = `
 .tm-strike,.tm-pip{fill:var(--anatomy-paper);stroke:var(--anatomy-lo);stroke-width:.4;transition:fill .25s}
 .tm-strike[data-on],.tm-pip[data-on]{fill:var(--tm-stop)}
 .tm-pip[data-jam]{animation:tm-jam 1s ease-in-out infinite}
+.tm-arriving{animation:tm-arrive 1.2s ease-out both}
+@keyframes tm-arrive{from{opacity:0}}
 @keyframes tm-jam{50%{fill:var(--anatomy-paper)}}
 .tm-crash{fill:none;stroke:var(--tm-stop);stroke-width:1.2}
+.tm-stage{position:relative}
+.tm-back{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;pointer-events:none}
+.tm-front{position:relative}
+.tm-shadows{filter:blur(9px);opacity:var(--anatomy-halo-opacity);transform:translateY(3px)}
+.tm-shadows>path{fill:var(--anatomy-halo)}
 .tm-stage{outline:none;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 .tm-stage:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:6px}
 .tm-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .iso-plate{overflow:hidden}
 @media (max-width:560px){.iso-plate .tm-stage .iso-svg{width:116%;margin:0 -8%}.iso-plate-corner[data-corner="hint"]{white-space:normal;max-width:48%;line-height:1.3}}
-@media (prefers-reduced-motion:reduce){.tm-strike,.tm-pip{transition:none}.tm-pip[data-jam]{animation:none}}
+@media (prefers-reduced-motion:reduce){.tm-strike,.tm-pip{transition:none}.tm-pip[data-jam],.tm-arriving{animation:none}}
 `;
 
 const data = {
@@ -108,6 +131,7 @@ const data = {
   demoLead: DEMO_LEAD,
   board: SCENE.B,
   road: SCENE.R,
+  pitch: M.PITCH * PARTS.U,
 };
 
 const script = [

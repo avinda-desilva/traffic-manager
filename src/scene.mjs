@@ -1,5 +1,7 @@
-// The board that doesn't move: a base plate on feet, the crossroads inlaid in
-// it, four kerbed islands, lampposts and a queue meter at each entry.
+// The board that doesn't move: one tile per crossroads, each a base plate on
+// feet with the junction inlaid in it, four kerbed islands, lampposts and a
+// queue meter at each outer entry. Every tile is drawn at the origin and
+// placed with a translate, which the isometric camera turns into a shift.
 import * as k from "../vendor/anatomy/kit/iso-kit.mjs";
 import * as G from "../vendor/anatomy/kit/lathe.mjs";
 import * as M from "./model.mjs";
@@ -22,28 +24,61 @@ const LAMPS = [
   [-LAMP, LAMP, -Math.PI / 4],
   [64, 19.5, -Math.PI / 2],
 ];
-const BAYS = { x0: -113, x1: -37, rows: [[37, 57], [93, 113]], step: 9.5 };
-const PARKED = [
-  ["car", -99.75, 47, -Math.PI / 2],
-  ["car", -61.75, 47, -Math.PI / 2],
-  ["van", -80.75, 102.5, Math.PI / 2],
-  ["car", -42.25, 103, Math.PI / 2],
-];
-const PATH = { x: 37, y: -78, w: 76, d: 6, r: 3 };
-const BENCHES = [
-  [48, -83.2, 1],
-  [70, -66.8, -1],
-];const LAMP_TOP = 32;
+const LAMP_TOP = 32;
 const SHOP = { x: -106, y: -106, w: 58, d: 58, r: 1.5 };
 const SHOP_TOP = 30;
-const TREES = [
-  [64, -92, 0.9],
-  [96, -64, 1],
-  [100, -100, 0.75],
-  [106, 106, 0.8],
-  [104, 50, 0.85],
-];
 const PIT = { x: 72.5, y: 90, w: 9, d: 9, r: 0.8 };
+
+// What each island carries, written for the near (+x, +y) quadrant and
+// mirrored into the others. The first tile keeps its corner shop, car park,
+// park and signal controller; later tiles get low plots, so nothing tall
+// stands in front of a road.
+const PLOTS = {
+  lot: {
+    bays: { x0: 37, x1: 113, rows: [[37, 57], [93, 113]], step: 9.5 },
+    parked: [
+      ["car", 99.75, 47, -Math.PI / 2],
+      ["car", 61.75, 47, -Math.PI / 2],
+      ["van", 80.75, 102.5, Math.PI / 2],
+      ["car", 42.25, 103, Math.PI / 2],
+    ],
+  },
+  park: {
+    paths: [{ x: 37, y: 72, w: 76, d: 6, r: 3 }],
+    benches: [
+      [48, 80.8, -1],
+      [70, 64.4, 1],
+    ],
+    trees: [
+      [64, 92, 0.9],
+      [96, 64, 1],
+      [100, 100, 0.75],
+    ],
+  },
+  grove: {
+    paths: [
+      { x: 37, y: 72, w: 76, d: 6, r: 3 },
+      { x: 72, y: 37, w: 6, d: 76, r: 3 },
+    ],
+    benches: [
+      [50, 80.8, -1],
+      [84, 64.4, 1],
+    ],
+    trees: [
+      [54, 54, 0.85],
+      [96, 52, 0.75],
+      [52, 98, 0.95],
+      [97, 96, 0.8],
+    ],
+  },
+  control: { trees: [[106, 106, 0.8], [104, 50, 0.85]], pit: true },
+  shop: { shop: true },
+};
+const FIRST = { "-1,-1": "shop", "1,-1": "park", "-1,1": "lot", "1,1": "control" };
+const CYCLE = ["park", "lot", "grove"];
+export const plotOf = (tile, [sx, sy], q) => (tile.index === 0 ? FIRST[`${sx},${sy}`] : CYCLE[(tile.index + q) % CYCLE.length]);
+const flipPlan = ({ x, y, w, d, r }, sx, sy) => ({ x: sx > 0 ? x : -(x + w), y: sy > 0 ? y : -(y + d), w, d, r });
+const flipHeading = (th, sx, sy) => Math.atan2(Math.sin(th) * sy, Math.cos(th) * sx);
 
 export const P = k.fitProjection(
   [...k.boxCorners(PLATE, -PLATE_H - FOOT_H, 0), ...k.boxCorners(SHOP, 0, SHOP_TOP + 8)],
@@ -94,20 +129,52 @@ function islandRing(sx, sy, inset = 0) {
   return ring.map(([x, y]) => [x * sx, y * sy]);
 }
 
-function plate() {
-  const out = [`<path class="iso-halo" d="${k.haloOf(PLATE, -PLATE_H - FOOT_H, PLATE_H, P)}"/>`];
-  for (const [x, y] of byDepth(k.corners(PLATE, 26))) {
+// Which sides of a tile butt against a neighbour: W and E along x, N and S
+// along y, matching the approach that enters from that side.
+export function joinsOf(tiles, tile) {
+  const has = (col, row) => tiles.some((each) => each.col === col && each.row === row);
+  return { W: has(tile.col - 1, tile.row), E: has(tile.col + 1, tile.row), N: has(tile.col, tile.row - 1), S: has(tile.col, tile.row + 1) };
+}
+
+// The plate's outline: round corners on the outside of the board, near-square
+// where two plates butt.
+function plateRing(joins, inset = 0) {
+  const corner = (a, b) => Math.max(0.3, (joins[a] || joins[b] ? 0.6 : PLATE.r) - inset);
+  const x0 = PLATE.x + inset;
+  const y0 = PLATE.y + inset;
+  const x1 = PLATE.x + PLATE.w - inset;
+  const y1 = PLATE.y + PLATE.d - inset;
+  return roundRect(x0, y0, x1, y1, [corner("E", "N"), corner("E", "S"), corner("W", "S"), corner("W", "N")], 8);
+}
+
+const plateHalo = (joins) => `<path class="iso-halo" d="${k.extrude(plateRing(joins), -PLATE_H - FOOT_H, PLATE_H, P).fill}"/>`;
+
+function plate(joins, plaque) {
+  const out = [];
+  const x0 = PLATE.x;
+  const y0 = PLATE.y;
+  const x1 = PLATE.x + PLATE.w;
+  const y1 = PLATE.y + PLATE.d;
+  const feet = k.corners(PLATE, 26).filter((_, index) => !([["W", "N"], ["E", "N"], ["W", "S"], ["E", "S"]][index].every((side) => joins[side])));
+  for (const [x, y] of byDepth(feet)) {
     out.push(S(k.cylinder(x, y, 8, -PLATE_H - FOOT_H, 1.8, P, 32), { tone: "lo" }));
     out.push(S(k.cylinder(x, y, 6.2, -PLATE_H - FOOT_H + 1.8, FOOT_H - 1.8, P, 32), { tone: "mid" }));
   }
-  const face = PLATE.y + PLATE.d;
-  out.push(S(k.slabOf(PLATE, -PLATE_H, PLATE_H, P, 8, 1.6), { tone: "lo", inner: L(k.sideSeam(PLATE, -PLATE_H + 2.4, P, 8), { tone: "faint" }) }));
-  out.push(L(k.planOutline(k.insetPlan(PLATE, 3), 0, P), { tone: "faint" }));
+  const ring = plateRing(joins);
+  out.push(S(k.extrude(ring, -PLATE_H, PLATE_H, P, { bevel: 1.6 }), { tone: "lo", inner: L(k.ringSeam(ring, -PLATE_H + 2.4, P), { tone: "faint" }) }));
+  out.push(L(k.onTop(plateRing(joins, 3), 0, P, true), { tone: "faint" }));
+  const seams = [];
+  if (joins.W) seams.push(k.lineOnTop([x0, y0], [x0, y1], 0, P));
+  if (joins.N) seams.push(k.lineOnTop([x0, y0], [x1, y0], 0, P));
+  if (seams.length) out.push(L(seams.join(""), { tone: "lo" }));
   const screws = k.corners(PLATE, 3);
   out.push(k.dotsSvg(screws.map(([x, y]) => at([x, y, 0])), { size: 0.5 }));
-  const ticks = k.sideTicks(-B + 8, B - 8, 4, 5, face, 0, [1.6, 3.4], P, "x");
-  out.push(L(ticks.minor, { tone: "lo" }), L(ticks.major, { tone: "mid" }));
-  const side = PLATE.x + PLATE.w;
+  if (!joins.S) {
+    const ticks = k.sideTicks(-B + 8, B - 8, 4, 5, y1, 0, [1.6, 3.4], P, "x");
+    out.push(L(ticks.minor, { tone: "lo" }), L(ticks.major, { tone: "mid" }));
+  }
+  if (!plaque) return out.join("");
+  const side = x1;
   const label = [
     [side, -34, -2.2],
     [side, 34, -2.2],
@@ -120,19 +187,24 @@ function plate() {
   return out.join("");
 }
 
-function road() {
+// Where each arm of the road ends: at the island's end on an outer side, at
+// the plate's edge where the road runs on into the next tile.
+const reachOf = (joins) => Object.fromEntries(M.IDS.map((id) => [id, joins[id] ? -PLATE.x : B]));
+
+function road(joins) {
+  const end = reachOf(joins);
   const ring = [
-    [B, -R],
-    [B, R],
+    [end.E, -R],
+    [end.E, R],
     [R, R],
-    [R, B],
-    [-R, B],
+    [R, end.S],
+    [-R, end.S],
     [-R, R],
-    [-B, R],
-    [-B, -R],
+    [-end.W, R],
+    [-end.W, -R],
     [-R, -R],
-    [-R, -B],
-    [R, -B],
+    [-R, -end.N],
+    [R, -end.N],
     [R, -R],
   ];
   return S(k.extrude(ring, 0, PARTS.ROAD_H, P, { convex: false }), { tone: "lo", className: "tm-road" });
@@ -140,14 +212,17 @@ function road() {
 
 const paint = (plan) => S(k.slabOf(plan, PARTS.ROAD_H, 0.08, P, 2), { tone: "lo", flat: true, className: "tm-paint" });
 
-function markings() {
+// The centre dashes repeat every 12 units from each junction, and a tile is
+// a whole number of repeats wide, so they run on evenly across a seam.
+function markings(joins) {
   const out = [];
   const stopAt = (M.BOARD - M.S_STOP) * PARTS.U;
-  for (let c = stopAt + 4; c + 6 <= B - 3; c += 12) {
-    for (const from of [c, -c - 6]) {
-      out.push(paint({ x: from, y: -0.35, w: 6, d: 0.7, r: 0.3 }));
-      out.push(paint({ x: -0.35, y: from, w: 0.7, d: 6, r: 0.3 }));
-    }
+  const end = reachOf(joins);
+  for (let c = stopAt + 4; c + 6 <= Math.max(...Object.values(end)) - 3; c += 12) {
+    if (c + 6 <= end.E - 3) out.push(paint({ x: c, y: -0.35, w: 6, d: 0.7, r: 0.3 }));
+    if (c + 6 <= end.W - 3) out.push(paint({ x: -c - 6, y: -0.35, w: 6, d: 0.7, r: 0.3 }));
+    if (c + 6 <= end.S - 3) out.push(paint({ x: -0.35, y: c, w: 0.7, d: 6, r: 0.3 }));
+    if (c + 6 <= end.N - 3) out.push(paint({ x: -0.35, y: -c - 6, w: 0.7, d: 6, r: 0.3 }));
   }
   for (const approach of M.APPROACHES) {
     const [ax, ay] = M.laneAt(approach, M.S_STOP).map((v) => v * PARTS.U);
@@ -188,7 +263,7 @@ function drain(approach) {
   return out.join("");
 }
 
-function island(sx, sy) {
+function island(sx, sy, kind) {
   const ring = islandRing(sx, sy);
   const kerb = islandRing(sx, sy, 2.4);
   const out = [S(k.extrude(ring, 0, PARTS.ISLAND_H, P, { bevel: 0.5 }), { tone: "mid", className: "tm-kerb" })];
@@ -196,13 +271,13 @@ function island(sx, sy) {
   const lo = R + WALK;
   const hi = B - 5;
   const plot = roundRect(lo, lo, hi, hi, [3, 3, 3, 3], 4).map(([x, y]) => [x * sx, y * sy]);
-  const lot = sx < 0 && sy > 0;
-  out.push(S(k.extrude(plot, PARTS.ISLAND_H, 0.8, P, { bevel: 0.3 }), { tone: "lo", className: lot ? "tm-plot tm-lot" : "tm-plot" }));
+  const plan = PLOTS[kind];
+  out.push(S(k.extrude(plot, PARTS.ISLAND_H, 0.8, P, { bevel: 0.3 }), { tone: "lo", className: plan.bays ? "tm-plot tm-lot" : "tm-plot" }));
   const bed = roundRect(lo + 2, lo + 2, hi - 2, hi - 2, [1.5, 1.5, 1.5, 1.5], 3).map(([x, y]) => [x * sx, y * sy]);
   out.push(L(k.onTop(bed, PLOT_Z, P, true), { tone: "faint" }));
-  if (lot) out.push(bays());
-  if (sx > 0 && sy < 0) out.push(S(k.slabOf(PATH, PLOT_Z, 0.1, P, 4), { tone: "lo", flat: true, className: "tm-paint" }));
-  if (sx > 0 && sy > 0) out.push(drawPit());
+  if (plan.bays) out.push(bays(plan.bays, sx, sy));
+  for (const path of plan.paths ?? []) out.push(S(k.slabOf(flipPlan(path, sx, sy), PLOT_Z, 0.1, P, 4), { tone: "lo", flat: true, className: "tm-paint" }));
+  if (plan.pit) out.push(drawPit());
   return out.join("");
 }
 
@@ -221,19 +296,23 @@ function drawPit() {
   return out.join("");
 }
 
-// Car park bays on the left plot: two rows, each divider ending on the aisle line.
-function bays() {
+// Car park bays: two rows, each divider ending on the aisle line.
+function bays(plan, sx, sy) {
   const lines = [];
-  for (const [y0, y1] of BAYS.rows) {
-    const aisle = y0 === BAYS.rows[0][0] ? y1 : y0;
-    lines.push(k.lineOnTop([BAYS.x0, aisle], [BAYS.x1, aisle], PLOT_Z, P));
-    for (let x = BAYS.x0 + BAYS.step - 1; x < BAYS.x1 - 2; x += BAYS.step) lines.push(k.lineOnTop([x, y0], [x, y1], PLOT_Z, P));
+  const line = ([ax, ay], [bx, by]) => k.lineOnTop([ax * sx, ay * sy], [bx * sx, by * sy], PLOT_Z, P);
+  for (const [y0, y1] of plan.rows) {
+    const aisle = y0 === plan.rows[0][0] ? y1 : y0;
+    lines.push(line([plan.x0, aisle], [plan.x1, aisle]));
+    for (let x = plan.x1 - plan.step + 1; x > plan.x0 + 2; x -= plan.step) lines.push(line([x, y0], [x, y1]));
   }
   return L(lines.join(""), { tone: "mid" });
 }
 
-function meter(approach) {
+// A queue meter: the strip on the kerb is ground; its pips light and pulse,
+// so the page keeps them with the live parts.
+function meter(approach, lane) {
   const out = [];
+  const pips = [];
   const point = (s, q, z) => [...M.laneAt(approach, s / PARTS.U, (M.LANE / 2) + q / PARTS.U).map((v) => v * PARTS.U), z];
   const corners = [point(5, 2.6, 0), point(30, 2.6, 0), point(30, 7.4, 0), point(5, 7.4, 0)];
   const ring = corners.map(([x, y]) => [x, y]);
@@ -241,19 +320,69 @@ function meter(approach) {
   const top = PARTS.ISLAND_H + 0.9;
   for (let index = 0; index < M.JAM; index++) {
     const [x, y] = point(8 + index * 4.2, 5, 0);
-    out.push(`<path class="tm-pip" data-approach="${approach.id}" data-n="${index}" d="${k.ring(x, y, 1.15, top, P, 18)}"/>`);
+    pips.push(`<path class="tm-pip" data-lane="${lane}" data-n="${index}" d="${k.ring(x, y, 1.15, top, P, 18)}"/>`);
   }
+  return { strip: out.join(""), pips: pips.join("") };
+}
+
+// A tile's ground, at the origin: its halo (drawn under every tile, so no
+// shadow falls on a neighbour), its body and its meter pips. The name plaque sits on the
+// east face of the first row's last tile.
+export function tileGroundSvg(tiles, tile) {
+  const joins = joinsOf(tiles, tile);
+  const plaque = tile.row === 0 && !joins.E;
+  const out = [plate(joins, plaque), road(joins), markings(joins)];
+  out.push(manhole(-72, 7.5), manhole(52, -7.5), manhole(-7.5, -76), manhole(7.5, 56));
+  M.APPROACHES.forEach((approach) => out.push(drain(approach)));
+  const islands = QUADRANTS.map((quadrant, q) => [quadrant, plotOf(tile, quadrant, q)]).sort(([a], [b]) => depth2(a[0], a[1]) - depth2(b[0], b[1]));
+  for (const [[sx, sy], kind] of islands) out.push(island(sx, sy, kind));
+  const pips = [];
+  M.APPROACHES.forEach((approach) => {
+    if (joins[approach.id]) return;
+    const { strip, pips: lamps } = meter(approach, M.lineOf(tile, approach.id));
+    out.push(strip);
+    pips.push(lamps);
+  });
+  out.push(`<g data-shadows>${tileShadowsSvg(tile)}</g>`);
+  return { halo: plateHalo(joins), body: out.join(""), pips: pips.join(""), sign: JSON.stringify(joins) };
+}
+
+// The soft shadows of everything that stands still on a tile. They lie on the
+// ground under every standing part, so they are drawn once with the ground:
+// a blurred shadow in the sorted layer would be repainted on every frame.
+const HALO = /<path class="iso-halo[^"]*" d="[^"]*"\/>/g;
+const splitHalos = (svg) => [(svg.match(HALO) ?? []).join(""), svg.replace(HALO, "")];
+function tileShadowsSvg(tile) {
+  const out = tileProps(tile).map((prop) => prop.halo);
+  out.push(...M.IDS.map((id) => PARTS.gateHaloSvg(id, P)));
+  if (tile.index === 0) out.push(PARTS.strikeBoardHaloSvg(P));
   return out.join("");
 }
 
-export function groundSvg() {
-  const out = [plate(), road(), markings()];
-  out.push(manhole(-72, 7.5), manhole(52, -7.5), manhole(-7.5, -76), manhole(7.5, 56));
-  M.APPROACHES.forEach((approach) => out.push(drain(approach)));
-  const islands = [...QUADRANTS].sort((a, b) => depth2(a[0], a[1]) - depth2(b[0], b[1]));
-  for (const [sx, sy] of islands) out.push(island(sx, sy));
-  M.APPROACHES.forEach((approach) => out.push(meter(approach)));
-  return out.join("");
+// Where a tile sits on screen relative to the first, as an SVG transform.
+export const offsetOf = (tile) => [tile.x * PARTS.U, tile.y * PARTS.U];
+export const placeOf = (tile) => k.translateAlong(P, [...offsetOf(tile), 0]);
+export const shiftBox = (box, [dx, dy]) => [box[0] + dx, box[1] + dx, box[2] + dy, box[3] + dy, box[4], box[5]];
+
+// The viewBox that frames every tile, with the margins of the one-tile fit.
+// One tile gives exactly the card's own 0 0 WIDTH HEIGHT.
+export function viewFor(tiles) {
+  const points = tiles.flatMap((tile) => {
+    const [dx, dy] = offsetOf(tile);
+    const plate = { ...PLATE, x: PLATE.x + dx, y: PLATE.y + dy };
+    const extra = tile.index === 0 ? k.boxCorners(SHOP, 0, SHOP_TOP + 8) : [];
+    return [...k.boxCorners(plate, -PLATE_H - FOOT_H, 0), ...extra];
+  });
+  const flat = points.map(at);
+  const xs = flat.map(([x]) => x);
+  const ys = flat.map(([, y]) => y);
+  const [left, right, up, down] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const pad = 22;
+  const scale = Math.max(1, (right - left) / (WIDTH - 2 * pad), (down - up) / (HEIGHT - 2 * pad));
+  const w = WIDTH * scale;
+  const h = HEIGHT * scale;
+  const round = (value) => Math.round(value * 100) / 100;
+  return [round((left + right) / 2 - w / 2), round((up + down) / 2 - h / 2), round(w), round(h)];
 }
 
 function lamppost([x, y, toward], index) {
@@ -350,8 +479,28 @@ function bench([x, y, facing], index) {
   return { key: `bench${index}`, svg: out.join(""), box: [x, x + 8, y, y + 2.4, 0, PLOT_Z + 5.4] };
 }
 
-export function props() {
-  return [shop(), ...TREES.map(tree), ...LAMPS.map(lamppost), ...PARKED.map(parked), ...BENCHES.map(bench)];
+// The things that stand up on a tile, at the origin, keyed by tile. The signal
+// controller is not here: the page redraws it as strikes land.
+export function tileProps(tile) {
+  const trees = [];
+  const cars = [];
+  const benches = [];
+  const out = LAMPS.map(lamppost);
+  QUADRANTS.forEach(([sx, sy], q) => {
+    const plan = PLOTS[plotOf(tile, [sx, sy], q)];
+    if (plan.shop) out.push(shop());
+    for (const [x, y, size] of plan.trees ?? []) trees.push([x * sx, y * sy, size]);
+    for (const [kind, x, y, th] of plan.parked ?? []) cars.push([kind, x * sx, y * sy, flipHeading(th, sx, sy)]);
+    for (const [x, y, facing] of plan.benches ?? []) {
+      const { x: bx, y: by } = flipPlan({ x, y, w: 8, d: 2.4, r: 0 }, sx, sy);
+      benches.push([bx, by, facing * sy]);
+    }
+  });
+  out.push(...trees.map(tree), ...cars.map(parked), ...benches.map(bench));
+  return out.map((prop) => {
+    const [halo, svg] = splitHalos(prop.svg);
+    return { ...prop, svg, halo, key: `t${tile.index}:${prop.key}` };
+  });
 }
 
 // Painter's order for things that stand up: where two items overlap on
@@ -380,7 +529,7 @@ export function paintOrder(items, P0) {
     }
     return centre(a) - centre(b);
   };
-  const boxes = items.map((item) => screenBoxOf(item.box, P0));
+  const boxes = items.map((item) => item.screen ?? screenBoxOf(item.box, P0));
   const behind = items.map(() => []);
   for (let i = 0; i < items.length; i++) {
     for (let j = i + 1; j < items.length; j++) {
