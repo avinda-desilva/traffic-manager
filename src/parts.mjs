@@ -254,3 +254,26 @@ export function strikeBoardSvg(strikes, P) {
 
 export const strikeBoardHaloSvg = (P) => `<path class="iso-halo" d="${k.haloOf(k.insetPlan(PLINTH, -1.2), CABINET_Z, 0.1, P)}"/>`;
 export const strikeBoardBox = () => [PLINTH.x, PLINTH.x + PLINTH.w, PLINTH.y, PLINTH.y + PLINTH.d, 0, LID_Z + 1.2 + 2.3];
+
+// The marker over a gate to open while its road is jammed: a red arrow
+// hanging point-down, turned a little off the view so its thickness shows.
+// Built at the origin with its tip there; the page moves it and bobs it.
+export const ARROW_LIFT = 16;
+export function arrowSvg(P) {
+  const [vx, vy] = k.towardViewer(P);
+  const turn = 0.55;
+  const a = [vx * Math.cos(turn) - vy * Math.sin(turn), vx * Math.sin(turn) + vy * Math.cos(turn), 0];
+  const F = G.frameOf([0, 0, 0], a, [a[1], -a[0], 0], [0, 0, 1]);
+  const head = [
+    [0, 0],
+    [7, 8.4],
+    [-7, 8.4],
+  ];
+  const shaft = [
+    [-2.8, 8.4],
+    [2.8, 8.4],
+    [2.8, 22.4],
+    [-2.8, 22.4],
+  ];
+  return [head, shaft].map((polygon) => k.solidSvg(G.prismOf(F, polygon, -1.8, 1.8, P), { tone: "hi", className: "tm-arrow" })).join("");
+}

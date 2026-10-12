@@ -70,30 +70,37 @@ const front = k.figureSvg({
 });
 const figure = back + front;
 
-const kmh = (value) => Math.round(value * 3.6);
-const caption = [
-  `Every driver follows the Intelligent Driver Model: up to ${M.KINDS.car.a} m/s² away from the line, a ${M.KINDS.car.T} s headway, ${kmh(M.KINDS.car.v0)} km/h in a car.`,
-  `When a lamp turns red, drivers who can stop at ${M.SAFE_BRAKE} m/s² or less stop a metre short of the line; the rest run it.`,
-  `The arm waits for its detector to clear and takes ${M.ARM_TIME} s to swing. Drivers trust the gates and don't watch the other road, so open both roads at once and they meet:`,
-  `crashes are rigid-body impacts that conserve momentum, and wrecks slide on tyre friction (μ ${M.TYRE_GRIP}) until they stop.`,
-  `${M.STRIKES} strikes end the shift. A crash is one; so is a queue of ${M.JAM} off the board that doesn't move for ${M.JAM_TIME} s, and again every ${M.JAM_TIME} s it stays. Demand climbs and swings between the roads every 80 s.`,
-  `At ${M.TILE_AT.slice(0, 3).join(", ")} vehicles through and on up to ${M.TILE_AT.at(-1)}, a new crossroads joins the board, up to ${M.GROWTH.length}; where two meet, the road runs straight on into the next junction.`,
-].join(" ");
+// How to play, under the card: each rule with the symbol it refers to, in
+// the legend's type. The numbers come from the model.
+const ICONS = {
+  road: `<path d="M1.5 4.5h13M1.5 11.5h13"/><path class="tm-icon-dash" d="M2.5 8h3M7 8h2M10.5 8h3"/>`,
+  lamps: `<circle class="tm-icon-go" cx="4.5" cy="8" r="3"/><circle class="tm-icon-stop" cx="11.5" cy="8" r="3"/>`,
+  cross: `<path d="M8 1.5v13M1.5 8h13"/><path class="tm-icon-red" d="M3.5 3.5l3 3M6.5 3.5l-3 3"/>`,
+  tile: `<path d="M8 2.5 14.5 6 8 9.5 1.5 6Z"/><path d="M1.5 6v2.5L8 12l6.5-3.5V6"/>`,
+  meter: `<rect x="1.5" y="5" width="13" height="6" rx="1"/><circle class="tm-icon-stop" cx="4.5" cy="8" r="1.1"/><circle class="tm-icon-stop" cx="8" cy="8" r="1.1"/><circle cx="11.5" cy="8" r="1.1"/>`,
+  arrow: `<path class="tm-icon-arrow" d="M6.5 1.5h3v7h3L8 14.5 3.5 8.5h3Z"/>`,
+  touch: `<path d="M5.5 14.5V6.8a1.4 1.4 0 0 1 2.8 0v4.2"/><path d="M8.3 9.3a1.3 1.3 0 0 1 2.6 0v1.5a1.3 1.3 0 0 1 2.6 0v.8c0 1.6-1 2.9-2.4 2.9"/><path d="M3.5 4.5a4.2 4.2 0 0 1 6.8 0"/>`,
+  keys: `<rect x="1.5" y="4.5" width="13" height="7" rx="1.2"/><path d="M4 9h8"/>`,
+};
+const icon = (name) => `<svg class="tm-icon" viewBox="0 0 16 16" aria-hidden="true">${ICONS[name]}</svg>`;
+const strike = `<span class="tm-icon tm-icon-x" aria-hidden="true">X</span>`;
+const RULES = [
+  ["road", "Tap a road to open or shut its gate."],
+  ["lamps", "Green lamp: the gate is open and cars go. Red: shut, and cars stop at the line."],
+  ["cross", "Never open two crossing roads at once. Drivers don't look, so they crash."],
+  ["tile", `Every car that leaves the board scores. At ${M.TILE_AT.slice(0, 3).join(", ")} and on, a new crossroads joins, up to ${M.GROWTH.length}.`],
+  ["meter", `Each road coming in has a meter that lights as cars queue off the board. When all ${M.JAM} are lit, the road is jammed.`],
+  ["arrow", `A jam starts a ${M.JAM_TIME} s countdown, and a red arrow marks the gate to open. Every car that gets moving resets it.`],
+  [null, `${M.STRIKES} strikes end the shift: each crash, and each countdown that runs out.`],
+  ["touch", "Swipe to move, pinch to zoom, double-tap to see the whole board."],
+  ["keys", "Space starts a shift or shuts every gate. P pauses."],
+];
+const guide = `<details class="tm-guide"><summary>How to play</summary><ul class="tm-rules">${RULES.map(([name, text]) => `<li>${name ? icon(name) : strike}<span>${text}</span></li>`).join("")}</ul></details>`;
 
-const body = k.plateHtml({
-  fig: "Fig 1",
-  title: "Traffic manager",
-  hint: "Tap or press Space to start a shift",
-  readout: `demo · ${demo.cleared} through`,
-  keys: [
-    { mark: "lit", label: "The gate on the road you are pointing at" },
-    { mark: "green", label: "Lamp green: gate open" },
-    { mark: "red", label: "Lamp red: gate shut, strike lamps lit" },
-    { mark: "raised", label: "Car 4.5 m, van 5.4 m, bus 11.5 m" },
-  ],
-  caption,
-  body: `<div class="tm-stage" tabindex="0" role="application" aria-roledescription="game" aria-label="Traffic manager. Tap a road to open or shut the gate on it. Space starts a shift or shuts every gate. P pauses.">${figure}</div><p class="tm-live" aria-live="polite"></p>`,
-});
+// The card: score, title and strikes along the top, what's next along the
+// bottom, and a bar that blinks over the bottom while a road is jammed.
+const corner = (name, text, extra = "") => `<span class="iso-plate-corner" data-corner="${name}"${extra}>${text}</span>`;
+const body = `<figure class="iso-figure"><div class="iso-plate"><div class="iso-plate-corners" aria-hidden="true">${corner("fig", "Score: 0", " data-score")}${corner("title", "Traffic manager")}${corner("strikes", "", " data-strikes")}${corner("readout", "Tap or press Space to start a shift", " data-readout")}</div><div class="tm-stage" tabindex="0" role="application" aria-roledescription="game" aria-label="Traffic manager. Tap a road to open or shut the gate on it. Space starts a shift or shuts every gate. P pauses.">${figure}</div><div class="tm-alert" data-alert hidden></div><p class="tm-live" aria-live="polite"></p></div>${guide}</figure>`;
 
 const CSS = `
 .iso{--tm-asphalt:#171717;--tm-paint:#2e2e2e;--tm-stripe:#3a3a3a;--tm-stop:var(--anatomy-red);--tm-go:var(--anatomy-green)}
@@ -108,21 +115,48 @@ const CSS = `
 .tm-strike,.tm-pip{fill:var(--anatomy-paper);stroke:var(--anatomy-lo);stroke-width:.4;transition:fill .25s}
 .tm-strike[data-on],.tm-pip[data-on]{fill:var(--tm-stop)}
 .tm-pip[data-jam]{animation:tm-jam 1s ease-in-out infinite}
-.tm-arriving{animation:tm-arrive 1.2s ease-out both}
-@keyframes tm-arrive{from{opacity:0}}
 @keyframes tm-jam{50%{fill:var(--anatomy-paper)}}
+.tm-arrow>.iso-fill,.tm-arrow>.iso-shade{fill:var(--tm-stop)}
+.tm-arrow>.iso-shade[data-shade="2"],.tm-arrow>.iso-shade[data-shade="3"]{fill:color-mix(in srgb,var(--tm-stop) 78%,#000)}
+.tm-arrow>.iso-top{fill:color-mix(in srgb,var(--tm-stop) 72%,#fff)}
+.tm-arrow>.iso-line{stroke:color-mix(in srgb,var(--tm-stop) 55%,var(--anatomy-hi))}
 .tm-crash{fill:none;stroke:var(--tm-stop);stroke-width:1.2}
-.tm-stage{position:relative}
+.tm-stage{position:relative;overflow:hidden;--tm-fade:linear-gradient(#0000,#000 22px,#000 calc(100% - 22px),#0000),linear-gradient(90deg,#0000,#000 22px,#000 calc(100% - 22px),#0000);-webkit-mask-image:var(--tm-fade);-webkit-mask-composite:source-in;mask-image:var(--tm-fade);mask-composite:intersect}
 .tm-back{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;pointer-events:none}
 .tm-front{position:relative}
 .tm-shadows{filter:blur(9px);opacity:var(--anatomy-halo-opacity);transform:translateY(3px)}
 .tm-shadows>path{fill:var(--anatomy-halo)}
-.tm-stage{outline:none;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+.tm-stage{outline:none;cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 .tm-stage:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:6px}
+.tm-stage[data-input="pointer"]:focus-visible{outline:none}
 .tm-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.iso-plate{overflow:hidden}
-@media (max-width:560px){.iso-plate .tm-stage .iso-svg{width:116%;margin:0 -8%}.iso-plate-corner[data-corner="hint"]{white-space:normal;max-width:48%;line-height:1.3}}
-@media (prefers-reduced-motion:reduce){.tm-strike,.tm-pip{transition:none}.tm-pip[data-jam],.tm-arriving{animation:none}}
+body.iso{background:var(--anatomy-card)}
+.iso-plate{overflow:hidden;box-shadow:none;padding-bottom:92px}
+.iso-plate-corners{z-index:2}
+.iso-plate-corner[data-corner="title"]{left:50%;right:auto;transform:translateX(-50%)}
+.iso-plate-corner[data-corner="strikes"]{top:0;right:0;text-transform:uppercase;letter-spacing:.3em;margin-right:-.3em}
+.iso-plate-corner[data-corner="readout"]{left:0;right:0;text-align:center;white-space:normal;line-height:1.4}
+.tm-alert{position:absolute;z-index:2;left:20px;right:20px;bottom:46px;padding:7px 10px;text-align:center;font-family:var(--anatomy-mono);font-size:10.5px;line-height:1.4;letter-spacing:.06em;text-transform:uppercase;color:var(--tm-stop);border:1px solid color-mix(in srgb,var(--tm-stop) 55%,transparent);background:color-mix(in srgb,var(--tm-stop) 9%,var(--anatomy-card));animation:tm-blink 1s steps(1,end) infinite}
+.tm-alert[hidden]{display:none}
+@keyframes tm-blink{50%{opacity:.3}}
+.tm-guide{margin-top:16px;border-top:1px solid var(--anatomy-faint);color:var(--anatomy-muted);font-size:13px;line-height:1.5}
+.tm-guide>summary{display:flex;align-items:center;gap:10px;padding:14px 0;list-style:none;cursor:pointer;color:var(--anatomy-text);font-family:var(--anatomy-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase}
+.tm-guide>summary::-webkit-details-marker{display:none}
+.tm-guide>summary::before{content:"";width:5px;height:5px;margin:0 2px;border-right:1px solid currentColor;border-bottom:1px solid currentColor;transform:rotate(-45deg);transition:transform .2s}
+.tm-guide[open]>summary::before{transform:rotate(45deg)}
+.tm-guide>summary:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:4px}
+.tm-rules{display:grid;gap:10px;margin:0;padding:0 0 16px;list-style:none}
+.tm-rules li{display:grid;grid-template-columns:18px 1fr;gap:10px;align-items:start}
+.tm-icon{display:block;width:16px;height:16px;margin-top:2px}
+.tm-icon *{fill:none;stroke:var(--anatomy-hi);stroke-width:1.1;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.tm-icon .tm-icon-dash{stroke:var(--anatomy-mid)}
+.tm-icon .tm-icon-go{fill:var(--tm-go);stroke:var(--anatomy-lo)}
+.tm-icon .tm-icon-stop{fill:var(--tm-stop);stroke:var(--anatomy-lo)}
+.tm-icon .tm-icon-red{stroke:var(--tm-stop)}
+.tm-icon .tm-icon-arrow{fill:var(--tm-stop);stroke:color-mix(in srgb,var(--tm-stop) 55%,var(--anatomy-hi))}
+.tm-icon-x{margin-top:0;color:var(--anatomy-text);font-family:var(--anatomy-mono);font-size:11px;line-height:18px;letter-spacing:.1em;text-align:center}
+@media (max-width:560px){.iso-plate{padding-bottom:96px}.iso-plate .tm-stage{width:116%;margin:0 -8%}.tm-alert{left:12px;right:12px;bottom:44px}}
+@media (prefers-reduced-motion:reduce){.tm-strike,.tm-pip{transition:none}.tm-pip[data-jam],.tm-alert{animation:none}.tm-guide>summary::before{transition:none}}
 `;
 
 const data = {

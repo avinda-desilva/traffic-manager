@@ -611,6 +611,15 @@ function judge(game, dt) {
   pushEvent(game, { type: "over", ...game.over });
 }
 
+// The gate holding a jammed queue: the first shut one along its lane, or the
+// lane's first gate when every gate on it is open and something else is in
+// the way.
+export function gateFor(game, id) {
+  const lane = game.lanes[id];
+  const index = lane.tiles.find((each) => !game.tiles[each].open[lane.approach]) ?? lane.tiles[0];
+  return { tile: index, id: lane.approach };
+}
+
 // The lanes counting down to a jam strike, most urgent first.
 export const jamsOf = (game) =>
   laneList(game)

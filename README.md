@@ -13,17 +13,22 @@ The board starts in a demo that runs a safe two-phase plan. Press **Space** or t
 | Input | What it does |
 |---|---|
 | Tap or click a road | Swing the gate on that road open or shut |
+| Swipe (touch) | Move around the board |
+| Pinch (touch) | Zoom in or out |
+| Double-tap off a road (touch) | Fit the whole board again |
 | `Space` | Start a shift; during a shift, shut every gate |
 | `P` | Pause |
 
-Only the asphalt takes a tap: the gate cabinets, the junction box and the islands do nothing.
+Only the asphalt takes a tap: the gate cabinets, the junction box and the islands do nothing. A touch that moves more than a few pixels is a swipe, not a tap.
+
+The card shows the score top left, one **X** per strike top right, and the score that brings the next tile along the bottom. **How to play**, under the card, opens a short guide to every symbol.
 
 **Tiles.** The readout counts the vehicles you get through. At 15, 40, 80, 130, 190, 260, 340 and 430, a new crossroads joins the board: east, then south, then the corner that completes a 2×2, then out to 3×3 (nine tiles at most). Each new tile arrives with its gates shut, the view eases back to fit it, and where two tiles meet the road runs straight on, so traffic leaving one junction queues at the next.
 
 **Strikes.** The shift ends at **3 strikes**, shown on the lamps of the signal controller.
 
 - A crash is a strike.
-- So is a jam. Once **6 vehicles** are queued off the board at an outer entry (its meter is full and pulses), a **5 s** countdown starts. Every vehicle that drives on from the queue winds it back to 5 s. If it runs out, that's a strike, and it starts again while the queue is still that long.
+- So is a jam. Once **6 vehicles** are queued off the board at an outer entry (its meter is full and pulses), a **5 s** countdown starts: a red bar blinks along the bottom of the card with the seconds left, and a red arrow bobs over the gate holding the queue. Tap the road under the arrow. Every vehicle that drives on from the queue winds the countdown back to 5 s. If it runs out, that's a strike, and it starts again while the queue is still that long.
 
 Demand rises through the shift and swings between the two roads every 80 s, so a fixed rhythm falls behind. A full lane takes about 4.5 s to start moving once its gate opens, so open a jammed road early.
 
@@ -56,9 +61,9 @@ In the page, `window.trafficManager` exposes the live game and the model, which 
 | Path | What it is |
 |---|---|
 | `src/model.mjs` | The simulation: tiles, lanes, gates, drivers, collisions, demand, strikes, the demo autopilot. No DOM. |
-| `src/parts.mjs` | Parts that move or are rebuilt live: vehicles, boom gates, the signal controller with its strike lamps. |
+| `src/parts.mjs` | Parts that move or are rebuilt live: vehicles, boom gates, the signal controller with its strike lamps, the jam arrow. |
 | `src/scene.mjs` | Each tile's static ground (plate, roads, islands and their plots, meters, shadows) and props, the camera framing for a set of tiles, and the painter's-order sort. |
-| `src/live.js` | The page: game loop, input, tiles arriving, the camera, redraws and depth re-sorting. |
+| `src/live.js` | The page: game loop, taps, swipes and pinches, tiles arriving, the camera, the card's readouts, the jam bar and arrow, redraws and depth re-sorting. |
 | `build.mjs` | Inlines the kit and modules into standalone pages, with the first frame pre-rendered: a static back SVG for the ground and a live front SVG for everything that moves. |
 | `vendor/anatomy/kit/` | `iso-kit.mjs` and `lathe.mjs` from the Anatomy skill (MIT), unchanged. |
 | `.claude/hooks/session-start.sh` | Installs the Anatomy skill into `~/.claude/skills` at the start of each Claude Code cloud session. |

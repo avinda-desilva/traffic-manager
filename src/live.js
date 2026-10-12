@@ -14,7 +14,9 @@ const shadowLayer = svg.querySelector('[data-layer="shadows"]');
 const sortedLayer = svg.querySelector('[data-layer="sorted"]');
 const fxLayer = svg.querySelector('[data-layer="fx"]');
 const readout = document.querySelector("[data-readout]");
-const hint = document.querySelector('[data-corner="hint"]');
+const scoreboard = document.querySelector("[data-score]");
+const strikeboard = document.querySelector("[data-strikes]");
+const alarm = document.querySelector("[data-alert]");
 const announcer = document.querySelector(".tm-live");
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 const BEST_KEY = "traffic-manager-best";
@@ -22,6 +24,7 @@ const NAMES = Object.fromEntries(M.APPROACHES.map((approach) => [approach.id, ap
 const HOME = [0, 0, SCENE.WIDTH, SCENE.HEIGHT];
 const ARRIVE = 1.2;
 const CAMERA = 0.28;
+const ARROW = PARTS.arrowSvg(P);
 
 const readBest = () => {
   try {
@@ -49,6 +52,8 @@ let order = [];
 let pips = [...svg.querySelectorAll(".tm-pip")];
 let view = [...HOME];
 let aim = [...HOME];
+let painted = [...HOME];
+let warned = new Set();
 const fx = [];
 
 // What stands up, by key: props and gates carry the tile they belong to.
@@ -182,7 +187,7 @@ function resetBoard() {
   arriving.length = 0;
   order = [];
   drawTile(game.tiles[0]);
-  aim = SCENE.viewFor(game.tiles);
+  aimAt(SCENE.viewFor(game.tiles));
 }
 
 function syncVehicles() {
@@ -285,23 +290,92 @@ function sortLayer() {
   order = next;
 }
 
-// The camera follows its aim exponentially, so a new tile pulls the view back
-// calmly; line weights hold because the kit's strokes don't scale. The front
-// drawing takes each step as a viewBox. The back one is painted once at the
-// aim and carried there by a compositor transform, so the ground isn't
-// repainted on every frame of the move.
+// The camera. The front drawing takes the view as its viewBox. The back one
+// keeps the box it was last painted at and is carried to the view by a
+// compositor transform, so moving the camera doesn't repaint the ground; it
+// is repainted once the camera rests, so it ends sharp. Line weights hold
+// because the kit's strokes don't scale.
+const boxText = (box) => box.map((value) => Math.round(value * 100) / 100).join(" ");
+const same = (a, b) => a.every((value, index) => value === b[index]);
+function showView() {
+  svg.setAttribute("viewBox", boxText(view));
+  back.style.transform = same(view, painted) ? "" : `translate(${(((painted[0] - view[0]) / view[2]) * 100).toFixed(3)}%, ${(((painted[1] - view[1]) / view[3]) * 100).toFixed(3)}%) scale(${(painted[2] / view[2]).toFixed(5)})`;
+}
+function paint(box) {
+  painted = [...box];
+  back.setAttribute("viewBox", boxText(painted));
+  showView();
+}
+
+// Eases to a box, exponentially, so a new tile pulls the view back calmly.
+// The back drawing is painted at the destination first.
+function aimAt(box) {
+  aim = box;
+  paint(box);
+}
 function moveCamera(dt) {
-  if (view.every((value, index) => value === aim[index])) return;
+  if (gesture.points.size) return;
+  if (same(view, aim)) {
+    if (!same(view, painted)) paint(view);
+    return;
+  }
   const share = still.matches ? 1 : 1 - Math.exp(-dt / CAMERA);
   view = view.map((value, index) => {
     const next = value + (aim[index] - value) * share;
     return Math.abs(aim[index] - next) < 0.25 ? aim[index] : next;
   });
-  const text = (box) => box.map((value) => Math.round(value * 100) / 100).join(" ");
-  svg.setAttribute("viewBox", text(view));
-  if (back.getAttribute("viewBox") !== text(aim)) back.setAttribute("viewBox", text(aim));
-  const settled = view.every((value, index) => value === aim[index]);
-  back.style.transform = settled ? "" : `translate(${(((aim[0] - view[0]) / view[2]) * 100).toFixed(3)}%, ${(((aim[1] - view[1]) / view[3]) * 100).toFixed(3)}%) scale(${(aim[2] / view[2]).toFixed(5)})`;
+  showView();
+}
+
+// Touch: one finger swipes the board and two pinch it, about the point
+// between them; a touch that barely moves is a tap. The view can't drift off
+// the board or zoom past a fifth of the card.
+const gesture = { points: new Map(), anchor: null, tap: null, lastTap: null };
+const SLOP = 10;
+function clampView([x, y, w]) {
+  const fit = SCENE.viewFor(game.tiles);
+  const width = Math.min(Math.max(w, SCENE.WIDTH / 5), fit[2] * 1.25);
+  const height = (width * SCENE.HEIGHT) / SCENE.WIDTH;
+  const cx = Math.min(Math.max(x + w / 2, fit[0]), fit[0] + fit[2]);
+  const cy = Math.min(Math.max(y + (w * SCENE.HEIGHT) / SCENE.WIDTH / 2, fit[1]), fit[1] + fit[3]);
+  return [cx - width / 2, cy - height / 2, width, height];
+}
+function spreadOf() {
+  const list = [...gesture.points.values()];
+  const mid = [list.reduce((sum, [x]) => sum + x, 0) / list.length, list.reduce((sum, [, y]) => sum + y, 0) / list.length];
+  const spread = list.length > 1 ? Math.hypot(list[0][0] - list[1][0], list[0][1] - list[1][1]) : 0;
+  return { mid, spread };
+}
+function anchor() {
+  const rect = svg.getBoundingClientRect();
+  const { mid, spread } = spreadOf();
+  const per = view[2] / rect.width;
+  gesture.anchor = { rect, spread, width: view[2], world: [view[0] + (mid[0] - rect.left) * per, view[1] + (mid[1] - rect.top) * per] };
+}
+function follow() {
+  const { rect, spread: from, width, world } = gesture.anchor;
+  const { mid, spread } = spreadOf();
+  const w = width * (from && spread ? from / spread : 1);
+  const per = w / rect.width;
+  view = clampView([world[0] - (mid[0] - rect.left) * per, world[1] - (mid[1] - rect.top) * per, w]);
+  aim = [...view];
+  showView();
+}
+
+// A tap acts like a click. Two quick taps off the roads frame the whole
+// board again.
+function tapAt(event) {
+  const target = approachAt(event);
+  const now = performance.now();
+  const before = gesture.lastTap;
+  gesture.lastTap = { x: event.clientX, y: event.clientY, t: now };
+  if (!target && mode === "play" && before && now - before.t < 350 && Math.hypot(event.clientX - before.x, event.clientY - before.y) < 40) {
+    gesture.lastTap = null;
+    aimAt(SCENE.viewFor(game.tiles));
+    run();
+    return;
+  }
+  act(target);
 }
 
 // A new tile fades in as the camera pulls back. Opacity is written as an
@@ -321,8 +395,20 @@ function fadeIn(now) {
 
 const burst = (age, rise, fall) => (age < 0 ? 0 : M.smooth(0, rise, age) * (age > rise ? Math.exp(-(age - rise) / fall) : 1));
 
+// While a road is jammed, a red arrow bobs over the gate holding its queue,
+// just short of the stop line: the place to tap.
+function arrows(now) {
+  if (mode !== "play") return [];
+  const bob = still.matches ? 0 : 2.5 * Math.sin((now / 1000) * Math.PI * 1.8);
+  return M.jamsOf(game).map((lane) => {
+    const gate = M.gateFor(game, lane.id);
+    const [x, y] = M.tileLaneAt(game.tiles[gate.tile], M.BY_ID[gate.id], M.S_STOP - 3.5).map((value) => value * U);
+    return `<g transform="${k.translateAlong(P, [x, y, PARTS.ARROW_LIFT + bob])}">${ARROW}</g>`;
+  });
+}
+
 function drawFx(now) {
-  const out = [];
+  const out = arrows(now);
   for (let index = fx.length - 1; index >= 0; index--) {
     const age = (now - fx[index].at) / 1000;
     if (age > 1.8) {
@@ -358,7 +444,7 @@ function handleEvents(now) {
     if (event.type === "jam") say(`The ${entryName(game.lanes[event.lane])} jammed, strike ${game.strikes} of ${M.STRIKES}.`);
     if (event.type === "tile") {
       for (const tile of game.tiles) drawTile(tile, tile.index === event.index ? now : null);
-      aim = SCENE.viewFor(game.tiles);
+      aimAt(SCENE.viewFor(game.tiles));
       say(`Tile ${event.index + 1} joins the board with every gate shut.`);
     }
     if (event.type === "over") {
@@ -374,17 +460,32 @@ function handleEvents(now) {
 
 const overText = () => `${M.STRIKES} strikes · ${game.cleared} through`;
 
-const HELP = "Tap a road · Space shuts all";
-
+// What the card says: the score top left, a cross per strike top right, what
+// comes next along the bottom, and the most urgent jam in the blinking bar.
 function words() {
-  if (mode === "demo") return [`demo · ${game.cleared} through`, "Tap or press Space to start a shift"];
-  if (mode === "over") return [`${overText()} · best ${best}`, "Tap or press Space for a new shift"];
-  if (paused) return ["paused · P to resume", HELP];
-  const [jam] = M.jamsOf(game);
-  if (jam) return [`${entryName(jam)} jammed · strike in ${Math.ceil(game.jam[jam.id].left)} s`, HELP];
-  if (selected && game.tiles[selected.tile]) return [`${gateName(selected)} gate ${game.tiles[selected.tile].open[selected.id] ? "open" : "shut"} · ${M.waitingAt(game, selected.tile, selected.id)} waiting`, HELP];
-  const next = M.nextTileAt(game);
-  return [`${game.cleared} through · ${next === null ? "board full" : `next tile at ${next}`} · ${game.strikes}/${M.STRIKES} strikes`, HELP];
+  const playing = mode !== "demo";
+  const score = `Score: ${playing ? game.cleared : 0}`;
+  const strikes = playing ? Array(Math.min(M.STRIKES, game.strikes)).fill("X").join(" ") : "";
+  const [jam] = mode === "play" ? M.jamsOf(game) : [];
+  const alert = jam ? `${entryName(jam)} jammed · tap under the arrow · ${Math.ceil(game.jam[jam.id].left)} s` : "";
+  let bottom;
+  if (mode === "demo") bottom = "Tap or press Space to start a shift";
+  else if (mode === "over") bottom = `Shift over · best ${best} · tap to play again`;
+  else if (paused) bottom = "Paused · P to resume";
+  else if (selected && game.tiles[selected.tile]) bottom = `${gateName(selected)} gate ${game.tiles[selected.tile].open[selected.id] ? "open" : "shut"} · ${M.waitingAt(game, selected.tile, selected.id)} waiting`;
+  else bottom = M.nextTileAt(game) === null ? "Board full" : `Next tile at ${M.nextTileAt(game)}`;
+  return { score, strikes, bottom, alert };
+}
+
+const write = (el, text) => {
+  if (el.textContent !== text) el.textContent = text;
+};
+
+// Says so once when a road starts counting down to a jam strike.
+function warn() {
+  const now = new Set(mode === "play" ? M.jamsOf(game).map((lane) => lane.id) : []);
+  for (const id of now) if (!warned.has(id)) say(`The ${entryName(game.lanes[id])} is jammed. Open the gate under the arrow within ${M.JAM_TIME} seconds.`);
+  warned = now;
 }
 
 function render(now, dt) {
@@ -395,9 +496,13 @@ function render(now, dt) {
   fadeIn(now);
   moveCamera(dt);
   drawFx(now);
-  const [text, help] = words();
-  if (readout.textContent !== text) readout.textContent = text;
-  if (hint.textContent !== help) hint.textContent = help;
+  warn();
+  const { score, strikes, bottom, alert } = words();
+  write(scoreboard, score);
+  write(strikeboard, strikes);
+  write(readout, bottom);
+  write(alarm, alert);
+  if (alarm.hidden !== !alert) alarm.hidden = !alert;
 }
 
 function tick(now) {
@@ -439,7 +544,7 @@ function pointerAt(event) {
 // tile and the gate on it. The boxes in the middle, the gate cabinets standing
 // over the asphalt and everything off it do nothing.
 function approachAt(event) {
-  if (event.target.closest?.(".tm-cabinet")) return null;
+  if (document.elementFromPoint(event.clientX, event.clientY)?.closest?.(".tm-cabinet")) return null;
   const { x: sx, y: sy } = pointerAt(event);
   const { sinA, cosA, sinE, k: scale } = k.cameraOf(P);
   const p = (sx - P.origin[0]) / scale;
@@ -466,13 +571,43 @@ function act(target) {
   run();
 }
 
+stage.addEventListener("pointerdown", (event) => {
+  stage.dataset.input = "pointer";
+  stage.focus({ preventScroll: true });
+  if (event.pointerType !== "touch") {
+    act(approachAt(event));
+    return;
+  }
+  try {
+    stage.setPointerCapture(event.pointerId);
+  } catch {}
+  gesture.points.set(event.pointerId, [event.clientX, event.clientY]);
+  gesture.tap = gesture.points.size === 1 ? [event.clientX, event.clientY] : null;
+  anchor();
+  run();
+});
 stage.addEventListener("pointermove", (event) => {
   if (event.pointerType === "mouse") setSelected(approachAt(event));
+  if (!gesture.points.has(event.pointerId)) return;
+  gesture.points.set(event.pointerId, [event.clientX, event.clientY]);
+  if (gesture.tap && Math.hypot(event.clientX - gesture.tap[0], event.clientY - gesture.tap[1]) > SLOP) gesture.tap = null;
+  if (!gesture.tap) follow();
 });
-stage.addEventListener("pointerleave", () => setSelected(null));
-stage.addEventListener("pointerdown", (event) => {
-  stage.focus({ preventScroll: true });
-  act(approachAt(event));
+const lift = (event) => {
+  if (!gesture.points.has(event.pointerId)) return;
+  gesture.points.delete(event.pointerId);
+  const tapped = gesture.tap && event.type === "pointerup";
+  gesture.tap = null;
+  if (gesture.points.size) anchor();
+  if (tapped) tapAt(event);
+};
+stage.addEventListener("pointerup", lift);
+stage.addEventListener("pointercancel", lift);
+stage.addEventListener("pointerleave", (event) => {
+  if (event.pointerType === "mouse") setSelected(null);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Tab") delete stage.dataset.input;
 });
 stage.addEventListener("keydown", (event) => {
   if (event.key === " " || event.key === "Enter") {

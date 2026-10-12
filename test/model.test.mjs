@@ -264,3 +264,14 @@ test("the same seed plays the same shift as the board grows", () => {
   assert.equal(first[0], 4);
   assert.deepEqual(play(), first);
 });
+
+test("a jam points at the first shut gate along its lane", () => {
+  const game = M.quiet(M.createGame());
+  M.addTile(game);
+  assert.deepEqual(M.gateFor(game, "W0"), { tile: 0, id: "W" });
+  M.setOpen(game, 0, "W", true);
+  assert.deepEqual(M.gateFor(game, "W0"), { tile: 1, id: "W" }, "the queue is held at the next tile");
+  M.setOpen(game, 1, "W", true);
+  assert.deepEqual(M.gateFor(game, "W0"), { tile: 0, id: "W" }, "all open: back to the entry");
+  assert.deepEqual(M.gateFor(game, "E0"), { tile: 1, id: "E" }, "the westbound lane enters on the east tile");
+});
