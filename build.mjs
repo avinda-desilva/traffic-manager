@@ -61,7 +61,7 @@ const caption = [
   `When a lamp turns red, drivers who can stop at ${M.SAFE_BRAKE} m/s² or less stop a metre short of the line; the rest run it.`,
   `The arm waits for its detector to clear and takes ${M.ARM_TIME} s to swing. Drivers trust the gates and don't watch the other road, so open both roads at once and they meet:`,
   `crashes are rigid-body impacts that conserve momentum, and wrecks slide on tyre friction (μ ${M.TYRE_GRIP}) until they stop.`,
-  `${M.STRIKES} crashes, or ${M.GRIDLOCK} vehicles queued off the board on one road, end the shift. Demand climbs and swings between the roads every 80 s.`,
+  `${M.STRIKES} strikes end the shift. A crash is one; so is a queue of ${M.JAM} off the board that doesn't move for ${M.JAM_TIME} s, and again every ${M.JAM_TIME} s it stays. Demand climbs and swings between the roads every 80 s.`,
 ].join(" ");
 
 const body = k.plateHtml({
@@ -72,7 +72,7 @@ const body = k.plateHtml({
   keys: [
     { mark: "lit", label: "The gate and lever you are pointing at" },
     { mark: "green", label: "Lamp green: gate open" },
-    { mark: "red", label: "Lamp red: gate shut, crash lamps lit" },
+    { mark: "red", label: "Lamp red: gate shut, strike lamps lit" },
     { mark: "raised", label: "Car 4.5 m, van 5.4 m, bus 11.5 m" },
   ],
   caption,
@@ -91,13 +91,15 @@ const CSS = `
 .tm-glow[data-go]{fill:var(--tm-go)}
 .tm-strike,.tm-pip{fill:var(--anatomy-paper);stroke:var(--anatomy-lo);stroke-width:.4;transition:fill .25s}
 .tm-strike[data-on],.tm-pip[data-on]{fill:var(--tm-stop)}
+.tm-pip[data-jam]{animation:tm-jam 1s ease-in-out infinite}
+@keyframes tm-jam{50%{fill:var(--anatomy-paper)}}
 .tm-crash{fill:none;stroke:var(--tm-stop);stroke-width:1.2}
 .tm-stage{outline:none;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 .tm-stage:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:6px}
 .tm-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .iso-plate{overflow:hidden}
 @media (max-width:560px){.iso-plate .tm-stage .iso-svg{width:116%;margin:0 -8%}.iso-plate-corner[data-corner="hint"]{white-space:normal;max-width:48%;line-height:1.3}}
-@media (prefers-reduced-motion:reduce){.tm-strike,.tm-pip{transition:none}}
+@media (prefers-reduced-motion:reduce){.tm-strike,.tm-pip{transition:none}.tm-pip[data-jam]{animation:none}}
 `;
 
 const data = {

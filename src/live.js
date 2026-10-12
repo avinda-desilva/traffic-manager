@@ -140,8 +140,11 @@ function syncGates(dt) {
     entry.sign = sign;
   }
   for (const pip of pips) {
-    const on = game.backlog[`${pip.dataset.approach}0`].length > Number(pip.dataset.n);
+    const lane = `${pip.dataset.approach}0`;
+    const on = game.backlog[lane].length > Number(pip.dataset.n);
+    const jam = mode === "play" && Boolean(game.jam[lane]);
     if (on !== pip.hasAttribute("data-on")) pip.toggleAttribute("data-on", on);
+    if (jam !== pip.hasAttribute("data-jam")) pip.toggleAttribute("data-jam", jam);
   }
 }
 
@@ -179,8 +182,9 @@ function handleEvents(now) {
     const event = game.events.shift();
     if (event.type === "crash" && mode === "play") {
       if (!still.matches) fx.push({ x: event.x * U, y: event.y * U, size: 10 + Math.min(22, event.speed * 2.2), at: now });
-      say(`Crash, ${game.strikes} of ${M.STRIKES}.`);
+      say(`Crash, strike ${game.strikes} of ${M.STRIKES}.`);
     }
+    if (event.type === "jam" && mode === "play") say(`The ${NAMES[game.lanes[event.lane].approach]} road jammed, strike ${game.strikes} of ${M.STRIKES}.`);
     if (event.type === "over" && mode === "play") {
       mode = "over";
       if (game.cleared > best) {
@@ -192,14 +196,16 @@ function handleEvents(now) {
   }
 }
 
-const overText = () => (game.over?.reason === "gridlock" ? `${NAMES[game.over.id]} road gridlocked · ${game.cleared} through` : `${M.STRIKES} crashes · ${game.cleared} through`);
+const overText = () => `${M.STRIKES} strikes · ${game.cleared} through`;
 
 function words() {
   if (mode === "demo") return [`demo · ${game.cleared} through`, "Tap or press Space to start a shift"];
   if (mode === "over") return [`${overText()} · best ${best}`, "Tap or press Space for a new shift"];
   if (paused) return ["paused · P to resume", "Tap a road · ← ↑ → ↓ · Space shuts all"];
+  const [jam] = M.jamsOf(game);
+  if (jam) return [`${NAMES[jam.approach]} road jammed · strike in ${Math.ceil(game.jam[jam.id].left)} s`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
   if (selected) return [`${NAMES[selected]} gate ${game.tiles[0].open[selected] ? "open" : "shut"} · ${M.queueOf(game, `${selected}0`)} waiting`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
-  return [`${game.cleared} through · ${game.strikes}/${M.STRIKES} crashes · ${M.waitingOf(game)} waiting`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
+  return [`${game.cleared} through · ${game.strikes}/${M.STRIKES} strikes · ${M.waitingOf(game)} waiting`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
 }
 
 function render(now, dt) {

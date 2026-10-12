@@ -112,10 +112,62 @@ test("a four-way standoff in the box clears instead of locking up", () => {
   assert.equal(game.vehicles.length, 0);
 });
 
-test("a closed junction under rising demand ends in gridlock", () => {
+test("a closed junction under rising demand strikes out on jams", () => {
   const game = M.createGame({ seed: 3 });
-  run(game, 240, () => {});
-  assert.equal(game.over?.reason, "gridlock");
+  run(game, 240);
+  assert.equal(game.over?.reason, "strikes");
+  assert.equal(game.over.cause, "jam");
+  assert.ok(game.events.filter((event) => event.type === "jam").length >= 1);
+});
+
+// Holds W0 full up to the entry, so nothing can drive on from its queue.
+const blockedQueue = (count) => {
+  const game = M.quiet(M.createGame());
+  for (const s of [21.5, 15, 8.5]) M.place(game, "W0", "car", s, 0);
+  game.backlog.W0.push(...Array(count).fill("car"));
+  return game;
+};
+
+test("a queue of 6 that doesn't move for 5 s is a strike, and again every 5 s it stays", () => {
+  const game = blockedQueue(M.JAM);
+  run(game, M.JAM_TIME - 0.1);
+  assert.equal(game.strikes, 0);
+  assert.ok(game.jam.W0.left < 0.2, "counting down");
+  run(game, 0.2);
+  assert.equal(game.strikes, 1);
+  assert.ok(game.events.some((event) => event.type === "jam" && event.lane === "W0"));
+  run(game, M.JAM_TIME);
+  assert.equal(game.strikes, 2);
+  assert.equal(game.over, null);
+  run(game, M.JAM_TIME);
+  assert.equal(game.strikes, 3);
+  assert.deepEqual([game.over?.reason, game.over?.cause], ["strikes", "jam"]);
+});
+
+test("a vehicle driving on from a jammed queue winds the countdown back", () => {
+  const game = blockedQueue(M.JAM + 2);
+  run(game, 0.3);
+  assert.ok(game.jam.W0.left < M.JAM_TIME - 0.2, "counting down");
+  M.setOpen(game, 0, "W", true);
+  let wound = null;
+  run(game, 8, () => {
+    if (wound === null && game.backlog.W0.length < M.JAM + 2) wound = game.jam.W0.left;
+  });
+  assert.ok(wound > M.JAM_TIME - 0.02, `wound back to ${wound}`);
+  assert.equal(game.strikes, 0, "the queue kept moving, so no strike");
+});
+
+test("crashes and jams share the three strikes", () => {
+  const game = blockedQueue(M.JAM);
+  M.setOpen(game, 0, "S", true);
+  M.setOpen(game, 0, "E", true);
+  M.place(game, "S0", "car", M.S_STOP - 2, 10);
+  M.place(game, "E0", "car", M.S_STOP - 2, 10);
+  run(game, 4);
+  assert.equal(game.strikes, 1, "the crash");
+  run(game, M.JAM_TIME + 1.2);
+  assert.equal(game.strikes, 3, "and two jam strikes");
+  assert.deepEqual([game.over?.reason, game.over?.cause], ["strikes", "jam"]);
 });
 
 test("the demo plan runs five minutes without a crash", () => {

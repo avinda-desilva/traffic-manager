@@ -16,7 +16,8 @@ export const SAFE_BRAKE = 4;
 export const PERCEIVE = 0.6;
 export const ARM_TIME = 1.4;
 export const STRIKES = 3;
-export const GRIDLOCK = 6;
+export const JAM = 6;
+export const JAM_TIME = 5;
 export const TYRE_GRIP = 0.7;
 export const ROLLING = 0.25;
 export const IMPACT_GRIP = 0.5;
@@ -116,6 +117,7 @@ export function createGame({ seed = 7, demo = false } = {}) {
     lanes: {},
     backlog: {},
     next: {},
+    jam: {},
     cleared: 0,
     strikes: 0,
     over: null,
@@ -497,6 +499,7 @@ function collide(game) {
       boxes[j] = boxOfVehicle(b);
       if (fresh) {
         game.strikes++;
+        game.struck = "crash";
         pushEvent(game, { type: "crash", x: hit.point[0], y: hit.point[1], speed: closing, ids: [a.id, b.id] });
       }
     }
@@ -576,13 +579,37 @@ function retire(game) {
   });
 }
 
-function judge(game) {
+// Three strikes end the shift. A crash is one. So is a jam: once JAM vehicles
+// are queued off the board on a lane, a countdown starts, and every vehicle
+// that drives on from the queue winds it back to JAM_TIME. If it runs out,
+// that's a strike, and it starts again while the queue is still that long.
+function judge(game, dt) {
   if (game.demo || game.over) return;
-  if (game.strikes >= STRIKES) game.over = { reason: "crashes", t: game.t };
-  const jammed = laneList(game).find((lane) => game.backlog[lane.id].length >= GRIDLOCK);
-  if (!game.over && jammed) game.over = { reason: "gridlock", id: jammed.approach, lane: jammed.id, t: game.t };
-  if (game.over) pushEvent(game, { type: "over", ...game.over });
+  for (const { id } of laneList(game)) {
+    const count = game.backlog[id].length;
+    const jam = game.jam[id];
+    if (count < JAM) game.jam[id] = null;
+    else if (!jam || count < jam.count) game.jam[id] = { left: JAM_TIME, count };
+    else {
+      jam.count = count;
+      jam.left -= dt;
+      if (jam.left > 1e-9) continue;
+      jam.left = JAM_TIME;
+      game.strikes++;
+      game.struck = "jam";
+      pushEvent(game, { type: "jam", lane: id });
+    }
+  }
+  if (game.strikes < STRIKES) return;
+  game.over = { reason: "strikes", cause: game.struck, t: game.t };
+  pushEvent(game, { type: "over", ...game.over });
 }
+
+// The lanes counting down to a jam strike, most urgent first.
+export const jamsOf = (game) =>
+  laneList(game)
+    .filter((lane) => game.jam[lane.id])
+    .sort((a, b) => game.jam[a.id].left - game.jam[b.id].left);
 
 export function step(game, dt = STEP) {
   game.t += dt;
@@ -592,7 +619,7 @@ export function step(game, dt = STEP) {
   collide(game);
   gates(game, dt);
   retire(game);
-  judge(game);
+  judge(game, dt);
   if (game.demo) autopilot(game);
 }
 

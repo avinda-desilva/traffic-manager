@@ -221,7 +221,7 @@ function meter(approach) {
   const ring = corners.map(([x, y]) => [x, y]);
   out.push(S(k.extrude(ring, PARTS.ISLAND_H, 0.9, P, { bevel: 0.3 }), { tone: "mid" }));
   const top = PARTS.ISLAND_H + 0.9;
-  for (let index = 0; index < M.GRIDLOCK; index++) {
+  for (let index = 0; index < M.JAM; index++) {
     const [x, y] = point(8 + index * 4.2, 5, 0);
     out.push(`<path class="tm-pip" data-approach="${approach.id}" data-n="${index}" d="${k.ring(x, y, 1.15, top, P, 18)}"/>`);
   }
