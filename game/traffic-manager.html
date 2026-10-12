@@ -3661,7 +3661,7 @@ let order = [];
 let pips = [...svg.querySelectorAll(".tm-pip")];
 let view = [...START];
 let aim = [...START];
-let painted = [...START];
+let width = 1;
 let fit = [...START];
 let warned = new Set();
 const fx = [];
@@ -3900,25 +3900,37 @@ function sortLayer() {
   order = next;
 }
 
-// The camera. The front drawing takes the view as its viewBox. The back one
-// keeps the box it was last painted at and is carried to the view by a
-// compositor transform, so moving the camera doesn't repaint the ground; it
-// is repainted once the camera rests, so it ends sharp. Line weights hold
+// The camera. The front drawing takes the view as its viewBox; it repaints
+// with the traffic on every frame anyway. The back one, the ground, is
+// painted once over the whole board at one zoom, and the compositor slides
+// and scales that picture to follow the view: a swipe never repaints it and
+// never uncovers ground that wasn't painted. It is repainted, sharp, only
+// when the camera rests at a new zoom or the board changes. Line weights hold
 // because the kit's strokes don't scale.
+const MARGIN = 30;
 const boxText = (box) => box.map((value) => Math.round(value * 100) / 100).join(" ");
 const same = (a, b) => a.every((value, index) => value === b[index]);
+const unitOf = (box) => width / box[2];
+let painted = { box: [...START], unit: 1, tiles: 0 };
 function showView() {
   svg.setAttribute("viewBox", boxText(view));
-  back.style.transform = same(view, painted) ? "" : `translate(${(((painted[0] - view[0]) / view[2]) * 100).toFixed(3)}%, ${(((painted[1] - view[1]) / view[3]) * 100).toFixed(3)}%) scale(${(painted[2] / view[2]).toFixed(5)})`;
+  const unit = unitOf(view);
+  const [x, y] = painted.box;
+  back.style.transform = `translate(${((x - view[0]) * unit).toFixed(2)}px, ${((y - view[1]) * unit).toFixed(2)}px) scale(${(unit / painted.unit).toFixed(5)})`;
 }
 function paint(box) {
-  painted = [...box];
-  back.setAttribute("viewBox", boxText(painted));
+  const [left, up, right, down] = SCENE.boundsOf(game.tiles);
+  const unit = unitOf(box);
+  painted = { box: [left - MARGIN, up - MARGIN, right - left + 2 * MARGIN, down - up + 2 * MARGIN], unit, tiles: game.tiles.length };
+  back.setAttribute("viewBox", boxText(painted.box));
+  back.style.width = `${(painted.box[2] * unit).toFixed(2)}px`;
+  back.style.height = `${(painted.box[3] * unit).toFixed(2)}px`;
   showView();
 }
+const stale = () => Math.abs(unitOf(view) / painted.unit - 1) > 1e-4 || painted.tiles !== game.tiles.length;
 
 // Eases to a box, exponentially, so a new tile pulls the view back calmly.
-// The back drawing is painted at the destination first.
+// The back drawing is painted at the destination's zoom first.
 function aimAt(box) {
   aim = box;
   paint(box);
@@ -3926,7 +3938,7 @@ function aimAt(box) {
 function moveCamera(dt) {
   if (gesture.points.size) return;
   if (same(view, aim)) {
-    if (!same(view, painted)) paint(view);
+    if (stale()) paint(view);
     return;
   }
   const share = still.matches ? 1 : 1 - Math.exp(-dt / CAMERA);
@@ -3941,8 +3953,9 @@ function moveCamera(dt) {
 // the screen: 100% zoom. The view always has the screen's shape, so the
 // drawing fills it edge to edge with nothing letterboxed.
 function refit() {
-  const { width, height } = stage.getBoundingClientRect();
-  if (!width || !height) return fit;
+  const { width: across, height } = stage.getBoundingClientRect();
+  if (!across || !height) return fit;
+  width = across;
   const [left, up, right, down] = SCENE.boundsOf(game.tiles);
   const top = header.getBoundingClientRect().height;
   const bottom = height - readout.getBoundingClientRect().top + 44;
@@ -3962,8 +3975,12 @@ function clampView([x, y, w]) {
   const width = Math.min(Math.max(w, fit[2] / ZOOM), fit[2]);
   const height = (width * fit[3]) / fit[2];
   const h = (w * fit[3]) / fit[2];
-  const cx = Math.min(Math.max(x + w / 2, fit[0] + width / 2), fit[0] + fit[2] - width / 2);
-  const cy = Math.min(Math.max(y + h / 2, fit[1] + height / 2), fit[1] + fit[3] - height / 2);
+  const [left, up, right, down] = SCENE.boundsOf(game.tiles);
+  // The middle of the view stays over the board and the view inside the
+  // whole board's frame, so a swipe never strands you on empty page.
+  const keep = (value, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.min(Math.max(value, lo), hi));
+  const cx = keep(x + w / 2, Math.max(fit[0] + width / 2, left), Math.min(fit[0] + fit[2] - width / 2, right));
+  const cy = keep(y + h / 2, Math.max(fit[1] + height / 2, up), Math.min(fit[1] + fit[3] - height / 2, down));
   return [cx - width / 2, cy - height / 2, width, height];
 }
 function spreadOf() {
