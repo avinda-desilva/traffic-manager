@@ -134,7 +134,9 @@ body.iso{background:var(--anatomy-card)}
 .tm-game{position:fixed;inset:0;overflow:hidden;background:var(--anatomy-card);--anatomy-paper:var(--anatomy-card)}
 .tm-stage{position:absolute;inset:0;overflow:hidden;outline:none;cursor:pointer;touch-action:none;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 .tm-stage .iso-svg{position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden}
-.tm-back{transform-origin:0 0;will-change:transform;pointer-events:none}
+.tm-back{pointer-events:none}
+.tm-rastered .tm-back{visibility:hidden}
+.tm-ground{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;pointer-events:none}
 .tm-stage:focus-visible{outline:1px solid var(--anatomy-muted);outline-offset:-8px}
 .tm-stage[data-input="pointer"]:focus-visible{outline:none}
 .tm-bar,.tm-foot{position:absolute;left:0;right:0;z-index:3;pointer-events:none;font-family:var(--tm-type);font-size:10.5px;line-height:1;letter-spacing:.04em;color:var(--anatomy-muted)}

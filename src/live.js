@@ -129,7 +129,9 @@ function addItem(key, svgText, box, tile, since) {
 }
 
 // Lays a tile's ground into the back drawing, in depth order, so a nearer
-// tile covers the plate edge of the one behind it.
+// tile covers the plate edge of the one behind it. A tile that faded in on
+// the front drawing keeps its copy there until the ground has been
+// rasterised with it, so it never blinks out.
 function land(tile, board) {
   haloLayer.appendChild(board.halo);
   const depth = tile.col + tile.row;
@@ -138,6 +140,9 @@ function land(tile, board) {
     return other && other.col + other.row > depth;
   });
   groundLayer.insertBefore(board.el, after ?? null);
+  if (board.ghost) ghosts.push({ els: board.ghost, from: serial + 1 });
+  board.ghost = null;
+  dirty = true;
 }
 
 // Draws a tile that isn't on the board yet, with its props and gates, and
@@ -153,14 +158,16 @@ function drawTile(tile, since = null) {
       el: node("g", { "data-tile": tile.index, transform: place }),
       halo: node("g", { "data-halo": tile.index, transform: place }),
       pips: node("g", { "data-pips": tile.index, transform: place }),
+      ghost: null,
       sign: null,
     };
     boards.set(tile.index, board);
     pipLayer.appendChild(board.pips);
     if (since === null) land(tile, board);
     else {
-      arrivingLayer.append(board.halo, board.el);
-      arriving.push({ el: board.el, since, land: () => land(tile, board) }, { el: board.halo, since }, { el: board.pips, since });
+      board.ghost = [node("g", { transform: place }), node("g", { transform: place })];
+      arrivingLayer.append(...board.ghost);
+      arriving.push({ el: board.ghost[1], since, land: () => land(tile, board) }, { el: board.ghost[0], since }, { el: board.pips, since });
     }
     const offset = SCENE.offsetOf(tile);
     for (const prop of SCENE.tileProps(tile)) addItem(prop.key, prop.svg, SCENE.shiftBox(prop.box, offset), tile, since);
@@ -170,7 +177,9 @@ function drawTile(tile, since = null) {
   board.el.innerHTML = ground.body;
   board.halo.innerHTML = ground.halo;
   board.pips.innerHTML = ground.pips;
+  if (board.ghost) [board.ghost[0].innerHTML, board.ghost[1].innerHTML] = [ground.halo, ground.body];
   board.sign = ground.sign;
+  dirty = true;
   pips = [...svg.querySelectorAll(".tm-pip")];
 }
 
@@ -190,8 +199,11 @@ function resetBoard() {
     boards.delete(index);
   }
   arriving.length = 0;
+  arrivingLayer.replaceChildren();
+  ghosts.length = 0;
   order = [];
   drawTile(game.tiles[0]);
+  dirty = true;
   aimAt(refit());
 }
 
@@ -296,44 +308,136 @@ function sortLayer() {
 }
 
 // The camera. The front drawing takes the view as its viewBox; it repaints
-// with the traffic on every frame anyway. The back one, the ground, is
-// painted once over the whole board at one zoom, and the compositor slides
-// and scales that picture to follow the view: a swipe never repaints it and
-// never uncovers ground that wasn't painted. It is repainted, sharp, only
-// when the camera rests at a new zoom or the board changes. Line weights hold
-// because the kit's strokes don't scale.
+// with the traffic on every frame anyway. The ground is rasterised into a
+// canvas over the whole board at one zoom, and the compositor slides and
+// scales that bitmap to follow the view. A canvas is one whole bitmap, so a
+// swipe or a pinch never uncovers ground that wasn't painted, which a large
+// moving SVG layer does in Safari, painting its tiles only as they come into
+// view. The ground is rasterised again, sharp, once the camera rests at a new
+// zoom or the board changes; the old bitmap shows until the new one is ready.
+// Line weights hold because the kit's strokes don't scale, and the bitmap's
+// strokes are scaled to its pixel density to match.
 const MARGIN = 30;
 const boxText = (box) => box.map((value) => Math.round(value * 100) / 100).join(" ");
 const same = (a, b) => a.every((value, index) => value === b[index]);
 const unitOf = (box) => width / box[2];
-let painted = { box: [...START], unit: 1, tiles: 0 };
+const SHEET = [...document.querySelectorAll("style")].map((el) => el.textContent).join("\n") + ".iso-halo{filter:none}.tm-soft{filter:url(#tm-soft)}";
+const sheetAt = (density) =>
+  SHEET.replace(/(stroke-width:\s*)([\d.]+)/g, (_, key, value) => `${key}${+(value * density).toFixed(3)}`).replace(/(--anatomy-weight:\s*)([\d.]+)px/g, (_, key, value) => `${key}${+(value * density).toFixed(3)}px`);
+let raster = null;
+let rendering = null;
+let broken = false;
+let dirty = true;
+let serial = 0;
+const ghosts = [];
+
 function showView() {
   svg.setAttribute("viewBox", boxText(view));
+  if (!raster) {
+    back.setAttribute("viewBox", boxText(view));
+    return;
+  }
   const unit = unitOf(view);
-  const [x, y] = painted.box;
-  back.style.transform = `translate(${((x - view[0]) * unit).toFixed(2)}px, ${((y - view[1]) * unit).toFixed(2)}px) scale(${(unit / painted.unit).toFixed(5)})`;
+  const [x, y] = raster.box;
+  raster.canvas.style.transform = `translate(${((x - view[0]) * unit).toFixed(2)}px, ${((y - view[1]) * unit).toFixed(2)}px) scale(${(unit / raster.unit).toFixed(5)})`;
 }
-function paint(box) {
+
+// The ground as one standalone SVG: shadows blurred as two groups (under the
+// plates, and over the ground under everything that stands) instead of one
+// filter per shadow, which keeps a rasterisation quick.
+function groundMarkup(box, pixels, density) {
+  const tiles = [];
+  const shadows = [];
+  for (const el of groundLayer.querySelectorAll(":scope > [data-tile]")) {
+    const copy = el.cloneNode(true);
+    const shade = copy.querySelector("[data-shadows]");
+    shade?.remove();
+    tiles.push(copy.outerHTML);
+    if (shade) shadows.push(`<g transform="${el.getAttribute("transform") ?? ""}">${shade.innerHTML}</g>`);
+  }
+  const theme = document.body.dataset.theme ?? "dark";
+  const soft = `<filter id="tm-soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="9"/></filter>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="iso" data-theme="${theme}" width="${pixels[0]}" height="${pixels[1]}" viewBox="${boxText(box)}" preserveAspectRatio="none" style="--anatomy-paper:var(--anatomy-card)"><style>${sheetAt(density)}</style><defs>${soft}</defs><g class="iso-svg"><g class="tm-soft">${haloLayer.innerHTML}</g>${tiles.join("")}<g class="tm-soft">${shadows.join("")}</g></g></svg>`;
+}
+
+// Rasterises the ground at a zoom, at the screen's pixel density but never
+// past the canvas sizes phones allow. Results that a newer request has
+// overtaken are dropped.
+async function rasterise(unit) {
+  const id = ++serial;
+  dirty = false;
+  rendering = { id, unit };
   const [left, up, right, down] = SCENE.boundsOf(game.tiles);
-  const unit = unitOf(box);
-  painted = { box: [left - MARGIN, up - MARGIN, right - left + 2 * MARGIN, down - up + 2 * MARGIN], unit, tiles: game.tiles.length };
-  back.setAttribute("viewBox", boxText(painted.box));
-  back.style.width = `${(painted.box[2] * unit).toFixed(2)}px`;
-  back.style.height = `${(painted.box[3] * unit).toFixed(2)}px`;
+  const box = [left - MARGIN, up - MARGIN, right - left + 2 * MARGIN, down - up + 2 * MARGIN];
+  const size = [box[2] * unit, box[3] * unit];
+  const dpr = Math.min(devicePixelRatio || 1, 3);
+  const density = dpr * Math.min(1, 4096 / (size[0] * dpr), 4096 / (size[1] * dpr), Math.sqrt(16e6 / (size[0] * size[1] * dpr * dpr)));
+  const pixels = [Math.max(1, Math.round(size[0] * density)), Math.max(1, Math.round(size[1] * density))];
+  const url = URL.createObjectURL(new Blob([groundMarkup(box, pixels, density)], { type: "image/svg+xml" }));
+  const image = new Image();
+  try {
+    await new Promise((done, fail) => {
+      image.onload = done;
+      image.onerror = fail;
+      image.src = url;
+    });
+  } catch {
+    broken = true;
+    return;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  // Drawing the bitmap holds the page for a moment, so it waits for any
+  // touch in progress to end.
+  while (gesture.points.size && id === serial) await new Promise((done) => setTimeout(done, 50));
+  if (id !== serial) return;
+  const canvas = document.createElement("canvas");
+  canvas.className = "tm-ground";
+  canvas.width = pixels[0];
+  canvas.height = pixels[1];
+  canvas.getContext("2d").drawImage(image, 0, 0, pixels[0], pixels[1]);
+  canvas.style.width = `${size[0].toFixed(2)}px`;
+  canvas.style.height = `${size[1].toFixed(2)}px`;
+  if (raster) {
+    raster.canvas.replaceWith(canvas);
+    raster.canvas.width = 0;
+  } else {
+    stage.insertBefore(canvas, svg);
+    stage.classList.add("tm-rastered");
+  }
+  raster = { box, unit, canvas };
+  rendering = null;
+  for (let index = ghosts.length - 1; index >= 0; index--) {
+    if (ghosts[index].from > id) continue;
+    ghosts[index].els.forEach((el) => el.remove());
+    ghosts.splice(index, 1);
+  }
   showView();
 }
-const stale = () => Math.abs(unitOf(view) / painted.unit - 1) > 1e-4 || painted.tiles !== game.tiles.length;
+
+// Asks for a raster at a zoom unless one is ready or on its way. Without a
+// raster (or if rasterising fails) the back SVG follows the view itself.
+function rasteriseAt(unit) {
+  if (broken) {
+    for (const ghost of ghosts.splice(0)) ghost.els.forEach((el) => el.remove());
+    return;
+  }
+  const target = rendering?.unit ?? raster?.unit;
+  if (!dirty && target && Math.abs(unit / target - 1) < 1e-4) return;
+  rasterise(unit);
+}
 
 // Eases to a box, exponentially, so a new tile pulls the view back calmly.
-// The back drawing is painted at the destination's zoom first.
+// The ground is rasterised once the camera rests, so drawing the bitmap
+// never holds up a move.
 function aimAt(box) {
   aim = box;
-  paint(box);
+  if (still.matches) rasteriseAt(unitOf(box));
 }
 function moveCamera(dt) {
   if (gesture.points.size) return;
   if (same(view, aim)) {
-    if (stale()) paint(view);
+    rasteriseAt(unitOf(view));
     return;
   }
   const share = still.matches ? 1 : 1 - Math.exp(-dt / CAMERA);
@@ -698,7 +802,8 @@ addEventListener("resize", () => {
   const w = fit[2] / zoom;
   view = clampView([centre[0] - w / 2, centre[1] - fit[3] / zoom / 2, w]);
   aim = [...view];
-  paint(view);
+  showView();
+  rasteriseAt(unitOf(view));
   run();
 });
 
@@ -708,5 +813,6 @@ window.trafficManager = { model: M, game: () => game, start, run };
 demo();
 view = refit();
 aim = [...view];
-paint(view);
+showView();
+rasteriseAt(unitOf(view));
 render(performance.now(), 0);
