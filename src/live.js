@@ -52,7 +52,7 @@ const drawn = new Map();
 function demo() {
   game = M.createGame({ seed: DATA.demoSeed, demo: true });
   M.advance(game, DATA.demoLead);
-  for (const id of M.IDS) lever[id] = game.open[id] ? 1 : 0;
+  for (const id of M.IDS) lever[id] = game.tiles[0].open[id] ? 1 : 0;
   mode = "demo";
 }
 
@@ -117,20 +117,21 @@ function syncVehicles() {
 }
 
 function syncGates(dt) {
+  const tile = game.tiles[0];
   for (const id of M.IDS) {
-    const target = game.open[id] ? 1 : 0;
+    const target = tile.open[id] ? 1 : 0;
     lever[id] = still.matches ? target : target > lever[id] ? Math.min(1, lever[id] + dt / 0.35) : Math.max(0, lever[id] - dt / 0.35);
     const entry = items.get(`gate-${id}`);
-    const share = game.arm[id];
-    const sign = `${share.toFixed(4)}|${game.open[id]}|${selected === id}`;
+    const share = tile.arm[id];
+    const sign = `${share.toFixed(4)}|${tile.open[id]}|${selected === id}`;
     if (entry.sign === sign) continue;
-    entry.el.innerHTML = PARTS.gateSvg(id, share, P, { go: game.open[id], lit: selected === id });
+    entry.el.innerHTML = PARTS.gateSvg(id, share, P, { go: tile.open[id], lit: selected === id });
     entry.box = PARTS.gateBox(id, share);
     entry.sign = sign;
   }
   const entry = items.get("frame");
   const shares = M.IDS.map((id) => lever[id]);
-  const go = M.IDS.map((id) => game.open[id]);
+  const go = M.IDS.map((id) => tile.open[id]);
   const lit = M.IDS.indexOf(selected);
   const strikes = mode === "demo" ? 0 : game.strikes;
   const sign = `${shares.map((share) => share.toFixed(3)).join()}|${go.join()}|${lit}|${strikes}`;
@@ -139,7 +140,7 @@ function syncGates(dt) {
     entry.sign = sign;
   }
   for (const pip of pips) {
-    const on = game.backlog[pip.dataset.approach].length > Number(pip.dataset.n);
+    const on = game.backlog[`${pip.dataset.approach}0`].length > Number(pip.dataset.n);
     if (on !== pip.hasAttribute("data-on")) pip.toggleAttribute("data-on", on);
   }
 }
@@ -197,7 +198,7 @@ function words() {
   if (mode === "demo") return [`demo · ${game.cleared} through`, "Tap or press Space to start a shift"];
   if (mode === "over") return [`${overText()} · best ${best}`, "Tap or press Space for a new shift"];
   if (paused) return ["paused · P to resume", "Tap a road · ← ↑ → ↓ · Space shuts all"];
-  if (selected) return [`${NAMES[selected]} gate ${game.open[selected] ? "open" : "shut"} · ${M.queueOf(game, selected)} waiting`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
+  if (selected) return [`${NAMES[selected]} gate ${game.tiles[0].open[selected] ? "open" : "shut"} · ${M.queueOf(game, `${selected}0`)} waiting`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
   return [`${game.cleared} through · ${game.strikes}/${M.STRIKES} crashes · ${M.waitingOf(game)} waiting`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
 }
 
@@ -276,7 +277,7 @@ function approachAt(event) {
 
 function act(id) {
   if (mode !== "play") start();
-  if (id) M.toggle(game, id);
+  if (id) M.toggle(game, 0, id);
   run();
 }
 
@@ -298,7 +299,7 @@ stage.addEventListener("keydown", (event) => {
   if (event.key === " " || event.key === "Enter") {
     event.preventDefault();
     if (mode !== "play") act(null);
-    else M.IDS.forEach((each) => M.setOpen(game, each, false));
+    else M.IDS.forEach((each) => M.setOpen(game, 0, each, false));
     run();
   }
   if ((event.key === "p" || event.key === "P") && mode === "play") {

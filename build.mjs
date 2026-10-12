@@ -31,8 +31,8 @@ M.advance(demo, DEMO_LEAD);
 const item = (key, svg, box) => ({ key, svg, box });
 const items = [
   ...SCENE.props().map((prop) => item(prop.key, prop.svg, prop.box)),
-  ...M.IDS.map((id) => item(`gate-${id}`, PARTS.gateSvg(id, demo.arm[id], P, { go: demo.open[id] }), PARTS.gateBox(id, demo.arm[id]))),
-  item("frame", PARTS.frameSvg(M.IDS.map((id) => (demo.open[id] ? 1 : 0)), P, { go: M.IDS.map((id) => demo.open[id]) }), SCENE.frameBox()),
+  ...M.IDS.map((id) => item(`gate-${id}`, PARTS.gateSvg(id, demo.tiles[0].arm[id], P, { go: demo.tiles[0].open[id] }), PARTS.gateBox(id, demo.tiles[0].arm[id]))),
+  item("frame", PARTS.frameSvg(M.IDS.map((id) => (demo.tiles[0].open[id] ? 1 : 0)), P, { go: M.IDS.map((id) => demo.tiles[0].open[id]) }), SCENE.frameBox()),
   ...demo.vehicles.map((vehicle) => {
     const body = M.bodyOf(vehicle);
     const [x, y] = [body.x * PARTS.U, body.y * PARTS.U];

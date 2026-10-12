@@ -1,4 +1,4 @@
-// The junction, its drivers and its crashes, in metres and seconds.
+// The junctions, their drivers and their crashes, in metres and seconds.
 // Pure: no DOM. The page and the tests run this same code.
 
 export const UNIT = 4;
@@ -26,6 +26,22 @@ export const WRECK_FADE = 0.8;
 export const FADE = 4;
 export const STEP = 1 / 120;
 
+// The board is a grid of tiles, each a crossroads on its own plate, one plate
+// width apart. Tiles join toward a square: east, south, then fill the 2×2,
+// then out to 3×3.
+export const PITCH = 2 * BOARD + 3;
+export const GROWTH = [
+  [0, 0],
+  [1, 0],
+  [0, 1],
+  [1, 1],
+  [2, 0],
+  [2, 1],
+  [0, 2],
+  [1, 2],
+  [2, 2],
+];
+
 export const KINDS = {
   car: { length: 4.5, width: 1.8, mass: 1300, v0: 10, a: 1.5, b: 2.0, T: 1.2, s0: 2, brake: 8 },
   van: { length: 5.4, width: 2.0, mass: 2300, v0: 9.5, a: 1.1, b: 1.8, T: 1.3, s0: 2, brake: 7 },
@@ -51,10 +67,16 @@ export const BY_ID = Object.fromEntries(APPROACHES.map((approach) => [approach.i
 export const IDS = APPROACHES.map((approach) => approach.id);
 export const AXIS_OF = { W: "EW", E: "EW", N: "NS", S: "NS" };
 
+// A point on an approach (tile-local) or a lane (on the board): both carry a
+// start, a direction of travel and a right-hand side.
 export const laneAt = (approach, s, lateral = 0) => [
   approach.start[0] + approach.dir[0] * s + approach.right[0] * lateral,
   approach.start[1] + approach.dir[1] * s + approach.right[1] * lateral,
 ];
+export const tileLaneAt = (tile, approach, s, lateral = 0) => {
+  const [x, y] = laneAt(approach, s, lateral);
+  return [x + tile.x, y + tile.y];
+};
 export const smooth = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -90,27 +112,70 @@ export function createGame({ seed = 7, demo = false } = {}) {
     nextId: 1,
     vehicles: [],
     events: [],
-    open: {},
-    epoch: {},
-    arm: {},
+    tiles: [],
+    lanes: {},
     backlog: {},
     next: {},
     cleared: 0,
     strikes: 0,
     over: null,
-    pilot: null,
+    quiet: false,
   };
-  for (const id of IDS) {
-    game.open[id] = false;
-    game.epoch[id] = 0;
-    game.arm[id] = 0;
-    game.backlog[id] = [];
-    game.next[id] = arrivalAfter(game, 0);
-  }
+  addTile(game);
   return game;
 }
 
 const arrivalAfter = (game, t) => t - Math.log(1 - game.rng()) / PEAK_RATE;
+
+// Each row carries an eastbound lane (W) and a westbound lane (E), each column
+// a southbound lane (N) and a northbound lane (S), straight through every tile
+// on it. A vehicle meets one stop line per tile, PITCH metres apart.
+export const lineOf = (tile, id) => `${id}${AXIS_OF[id] === "EW" ? tile.row : tile.col}`;
+export const laneOf = (game, index, id) => game.lanes[lineOf(game.tiles[index], id)];
+export const laneList = (game) => Object.values(game.lanes);
+
+// Places the next tile with its gates shut and lays every lane through it. A
+// lane whose entry moves outward carries its vehicles along by the same
+// distance, so they stay where they are on the board; its queue moves with it.
+export function addTile(game) {
+  const index = game.tiles.length;
+  if (index >= GROWTH.length) return null;
+  const [col, row] = GROWTH[index];
+  const tile = { index, col, row, x: col * PITCH, y: row * PITCH, open: {}, epoch: {}, arm: {}, pilot: null };
+  for (const id of IDS) {
+    tile.open[id] = false;
+    tile.epoch[id] = 0;
+    tile.arm[id] = 0;
+  }
+  game.tiles.push(tile);
+  for (const approach of APPROACHES) {
+    const id = lineOf(tile, approach.id);
+    const along = (each) => each.x * approach.dir[0] + each.y * approach.dir[1];
+    const tiles = game.tiles.filter((each) => lineOf(each, approach.id) === id).sort((a, b) => along(a) - along(b));
+    const start = [tiles[0].x + approach.start[0], tiles[0].y + approach.start[1]];
+    let lane = game.lanes[id];
+    if (lane) {
+      const shift = (lane.start[0] - start[0]) * approach.dir[0] + (lane.start[1] - start[1]) * approach.dir[1];
+      if (shift) for (const vehicle of game.vehicles) if (vehicle.lane === lane) vehicle.s += shift;
+    } else {
+      lane = game.lanes[id] = { id, approach: approach.id, dir: approach.dir, right: approach.right, heading: approach.heading };
+      game.backlog[id] = [];
+      game.next[id] = game.quiet ? Infinity : arrivalAfter(game, game.t);
+    }
+    Object.assign(lane, { tiles: tiles.map((each) => each.index), start, length: REACH + (tiles.length - 1) * PITCH });
+  }
+  if (index > 0) pushEvent(game, { type: "tile", index });
+  return tile;
+}
+
+// The next stop line on a vehicle's lane and the tile whose gate guards it. A
+// driver keeps watching a line until 0.2 m past it.
+export function gateAhead(game, vehicle) {
+  const lane = vehicle.lane;
+  const index = Math.max(0, Math.floor((vehicle.s - 0.2 - S_STOP) / PITCH) + 1);
+  if (index >= lane.tiles.length) return null;
+  return { tile: game.tiles[lane.tiles[index]], line: S_STOP + index * PITCH };
+}
 
 function kindOf(game) {
   let pick = game.rng();
@@ -121,14 +186,15 @@ function kindOf(game) {
   return MIX[0][0];
 }
 
-export function setOpen(game, id, open) {
-  if (game.over || game.open[id] === open) return false;
-  game.open[id] = open;
-  if (!open) game.epoch[id]++;
-  pushEvent(game, { type: "signal", id, open });
+export function setOpen(game, index, id, open) {
+  const tile = game.tiles[index];
+  if (game.over || !tile || tile.open[id] === open) return false;
+  tile.open[id] = open;
+  if (!open) tile.epoch[id]++;
+  pushEvent(game, { type: "signal", tile: index, id, open });
   return true;
 }
-export const toggle = (game, id) => setOpen(game, id, !game.open[id]);
+export const toggle = (game, index, id) => setOpen(game, index, id, !game.tiles[index].open[id]);
 
 function pushEvent(game, event) {
   game.events.push({ ...event, t: game.t });
@@ -138,9 +204,9 @@ function pushEvent(game, event) {
 // Where a vehicle's body is: centre, heading and velocity, in metres.
 export function bodyOf(vehicle) {
   if (vehicle.wreck) return vehicle.body;
-  const approach = BY_ID[vehicle.approach];
-  const [x, y] = laneAt(approach, vehicle.s - KINDS[vehicle.kind].length / 2);
-  return { x, y, th: approach.heading, vx: approach.dir[0] * vehicle.v, vy: approach.dir[1] * vehicle.v, w: 0 };
+  const lane = vehicle.lane;
+  const [x, y] = laneAt(lane, vehicle.s - KINDS[vehicle.kind].length / 2);
+  return { x, y, th: lane.heading, vx: lane.dir[0] * vehicle.v, vy: lane.dir[1] * vehicle.v, w: 0 };
 }
 
 export function cornersOf(body, kind) {
@@ -156,6 +222,13 @@ export function cornersOf(body, kind) {
     [body.x + c * hl + s * hw, body.y + s * hl - c * hw],
   ];
 }
+
+// How far a vehicle's corners reach from its centre.
+const REACH_OF = Object.fromEntries(Object.entries(KINDS).map(([name, { length, width }]) => [name, Math.hypot(length / 2, width / 2)]));
+
+// Moving vehicles on parallel lanes never meet: the opposite lane is a lane
+// width away and the next row or column a whole tile.
+const parallel = (a, b) => a.dir[0] * b.dir[0] + a.dir[1] * b.dir[1] !== 0;
 
 const boxOf = (body, half) => ({ ...body, hl: half[0], hw: half[1] });
 const boxOfVehicle = (vehicle) => {
@@ -291,9 +364,9 @@ export function idm(kind, v, v0, gap = Infinity, dv = 0) {
 export const stopsFor = (v, distance) => distance > 0 && (v * v) / (2 * distance) <= SAFE_BRAKE;
 
 function lanesOf(game) {
-  const lanes = Object.fromEntries(IDS.map((id) => [id, []]));
-  for (const vehicle of game.vehicles) if (!vehicle.wreck) lanes[vehicle.approach].push(vehicle);
-  for (const id of IDS) lanes[id].sort((a, b) => b.s - a.s);
+  const lanes = Object.fromEntries(laneList(game).map((lane) => [lane.id, []]));
+  for (const vehicle of game.vehicles) if (!vehicle.wreck) lanes[vehicle.lane.id].push(vehicle);
+  for (const id in lanes) lanes[id].sort((a, b) => b.s - a.s);
   return lanes;
 }
 
@@ -302,22 +375,28 @@ function lanesOf(game) {
 // only after it has been there for PERCEIVE seconds, and only yield to
 // crossing traffic that arrived before them, so a standoff in the box can't
 // hold forever: the first to arrive pushes on.
-function blockersAhead(game, vehicle, approach) {
+function blockersAhead(game, vehicle, lane) {
   const { width, length } = KINDS[vehicle.kind];
   const half = width / 2 + 0.4;
   const seen = (vehicle.seen ??= {});
   const found = [];
   const still = {};
   for (const other of game.vehicles) {
-    if (other === vehicle || (!other.wreck && (other.approach === vehicle.approach || other.id > vehicle.id))) continue;
+    if (other === vehicle || (!other.wreck && (parallel(other.lane, lane) || other.id > vehicle.id))) continue;
+    const body = bodyOf(other);
+    const cx = body.x - lane.start[0];
+    const cy = body.y - lane.start[1];
+    const middle = cx * lane.right[0] + cy * lane.right[1] - LANE / 2;
+    const reach = REACH_OF[other.kind];
+    if (middle + reach < -half || middle - reach > half || cx * lane.dir[0] + cy * lane.dir[1] < vehicle.s - length * 0.5) continue;
     let near = Infinity;
     let lo = Infinity;
     let hi = -Infinity;
-    for (const [x, y] of cornersOf(bodyOf(other), other.kind)) {
-      const dx = x - approach.start[0];
-      const dy = y - approach.start[1];
-      const along = dx * approach.dir[0] + dy * approach.dir[1];
-      const across = dx * approach.right[0] + dy * approach.right[1] - LANE / 2;
+    for (const [x, y] of cornersOf(body, other.kind)) {
+      const dx = x - lane.start[0];
+      const dy = y - lane.start[1];
+      const along = dx * lane.dir[0] + dy * lane.dir[1];
+      const across = dx * lane.right[0] + dy * lane.right[1] - LANE / 2;
       near = Math.min(near, along);
       lo = Math.min(lo, across);
       hi = Math.max(hi, across);
@@ -325,32 +404,40 @@ function blockersAhead(game, vehicle, approach) {
     if (hi < -half || lo > half || near < vehicle.s - length * 0.5) continue;
     still[other.id] = seen[other.id] ?? game.t;
     if (game.t - still[other.id] < PERCEIVE) continue;
-    const body = bodyOf(other);
-    found.push({ gap: near - vehicle.s, speed: Math.max(0, body.vx * approach.dir[0] + body.vy * approach.dir[1]) });
+    found.push({ gap: near - vehicle.s, speed: Math.max(0, body.vx * lane.dir[0] + body.vy * lane.dir[1]) });
   }
   vehicle.seen = still;
   return found;
 }
 
+// A driver watches one gate at a time: the next on their lane. Reaching a new
+// one, they decide afresh whether to stop for it, as a new arrival does.
 function drive(game, lanes, dt) {
-  for (const id of IDS) {
-    const approach = BY_ID[id];
-    const lane = lanes[id];
-    lane.forEach((vehicle, index) => {
+  for (const lane of laneList(game)) {
+    const id = lane.approach;
+    const queue = lanes[lane.id];
+    queue.forEach((vehicle, index) => {
       const kind = KINDS[vehicle.kind];
-      const toLine = S_STOP - vehicle.s;
-      if (!game.open[id] && vehicle.epoch !== game.epoch[id]) {
-        vehicle.epoch = game.epoch[id];
+      const ahead = gateAhead(game, vehicle);
+      if (ahead && vehicle.gate !== ahead.tile.index) {
+        vehicle.gate = ahead.tile.index;
+        vehicle.epoch = -1;
+        vehicle.obey = true;
+      }
+      const shut = Boolean(ahead) && !ahead.tile.open[id];
+      const toLine = ahead ? ahead.line - vehicle.s : Infinity;
+      if (shut && vehicle.epoch !== ahead.tile.epoch[id]) {
+        vehicle.epoch = ahead.tile.epoch[id];
         vehicle.obey = stopsFor(vehicle.v, toLine - STOP_SHORT);
       }
       let acc = idm(vehicle.kind, vehicle.v, vehicle.v0);
-      const leader = lane[index - 1];
+      const leader = queue[index - 1];
       if (leader) acc = Math.min(acc, idm(vehicle.kind, vehicle.v, vehicle.v0, leader.s - KINDS[leader.kind].length - vehicle.s, vehicle.v - leader.v));
-      if (!game.open[id] && vehicle.obey && toLine > -0.2) {
+      if (shut && vehicle.obey) {
         const room = Math.max(0.05, toLine - STOP_SHORT);
         acc = Math.min(acc, Math.max(idm(vehicle.kind, vehicle.v, vehicle.v0, toLine - STOP_SHORT + kind.s0, vehicle.v), -Math.max(kind.b, (1.05 * vehicle.v * vehicle.v) / (2 * room))));
       }
-      for (const blocker of blockersAhead(game, vehicle, approach)) acc = Math.min(acc, idm(vehicle.kind, vehicle.v, vehicle.v0, blocker.gap, vehicle.v - blocker.speed));
+      for (const blocker of blockersAhead(game, vehicle, lane)) acc = Math.min(acc, idm(vehicle.kind, vehicle.v, vehicle.v0, blocker.gap, vehicle.v - blocker.speed));
       acc = Math.max(acc, -kind.brake);
       const next = vehicle.v + acc * dt;
       if (next > 0) {
@@ -388,21 +475,26 @@ function slide(game, dt) {
 
 function collide(game) {
   const list = game.vehicles;
+  const boxes = list.map(boxOfVehicle);
   for (let i = 0; i < list.length; i++) {
     for (let j = i + 1; j < list.length; j++) {
       const a = list[i];
       const b = list[j];
-      if (!a.wreck && !b.wreck && a.approach === b.approach) continue;
-      const boxA = boxOfVehicle(a);
-      const boxB = boxOfVehicle(b);
-      const reach = Math.hypot(boxA.hl, boxA.hw) + Math.hypot(boxB.hl, boxB.hw);
-      if (Math.hypot(boxA.x - boxB.x, boxA.y - boxB.y) > reach) continue;
+      if (!a.wreck && !b.wreck && parallel(a.lane, b.lane)) continue;
+      const boxA = boxes[i];
+      const boxB = boxes[j];
+      const reach = REACH_OF[a.kind] + REACH_OF[b.kind];
+      const dx = boxA.x - boxB.x;
+      const dy = boxA.y - boxB.y;
+      if (dx * dx + dy * dy > reach * reach) continue;
       const hit = overlap(boxA, boxB);
       if (!hit) continue;
       const fresh = !a.wreck && !b.wreck;
       wreck(game, a);
       wreck(game, b);
       const { closing } = resolve(a.body, b.body, a.kind, b.kind, hit);
+      boxes[i] = boxOfVehicle(a);
+      boxes[j] = boxOfVehicle(b);
       if (fresh) {
         game.strikes++;
         pushEvent(game, { type: "crash", x: hit.point[0], y: hit.point[1], speed: closing, ids: [a.id, b.id] });
@@ -411,48 +503,58 @@ function collide(game) {
   }
 }
 
-const zoneOf = (approach) => {
-  const [x, y] = laneAt(approach, ARM_AT);
+// Bodies further apart than this can't touch a box of the given half-size.
+const within = (box, body, reach) => Math.abs(box.x - body.x) < reach && Math.abs(box.y - body.y) < reach;
+
+const zoneOf = (tile, approach) => {
+  const [x, y] = tileLaneAt(tile, approach, ARM_AT);
   return { x, y, th: approach.heading, hl: 0.45, hw: LANE / 2 + 0.2 };
 };
-export const armBlocked = (game, id) => game.vehicles.some((vehicle) => overlap(zoneOf(BY_ID[id]), boxOfVehicle(vehicle)));
+export const armBlocked = (game, index, id, bodies = game.vehicles.map(bodyOf)) => {
+  const zone = zoneOf(game.tiles[index], BY_ID[id]);
+  return game.vehicles.some((vehicle, at) => within(zone, bodies[at], 9) && overlap(zone, boxOfVehicle(vehicle)));
+};
 
 function gates(game, dt) {
-  for (const id of IDS) {
-    const target = game.open[id] || armBlocked(game, id) ? 1 : 0;
-    const by = dt / ARM_TIME;
-    game.arm[id] = target > game.arm[id] ? Math.min(target, game.arm[id] + by) : Math.max(target, game.arm[id] - by);
+  const bodies = game.vehicles.map(bodyOf);
+  for (const tile of game.tiles) {
+    for (const id of IDS) {
+      const target = tile.open[id] || armBlocked(game, tile.index, id, bodies) ? 1 : 0;
+      const by = dt / ARM_TIME;
+      tile.arm[id] = target > tile.arm[id] ? Math.min(target, tile.arm[id] + by) : Math.max(target, tile.arm[id] - by);
+    }
   }
 }
 
 export function entryClear(game, id, kind) {
   const { length, s0 } = KINDS[kind];
-  const approach = BY_ID[id];
-  const [x, y] = laneAt(approach, length / 2);
-  const entry = { x, y, th: approach.heading, hl: length / 2 + s0, hw: LANE / 2 };
+  const lane = game.lanes[id];
+  const [x, y] = laneAt(lane, length / 2);
+  const entry = { x, y, th: lane.heading, hl: length / 2 + s0, hw: LANE / 2 };
   return !game.vehicles.some((vehicle) => {
-    if (!vehicle.wreck && vehicle.approach === id) return vehicle.s - KINDS[vehicle.kind].length < length + s0 + 0.5;
+    if (!vehicle.wreck && vehicle.lane === lane) return vehicle.s - KINDS[vehicle.kind].length < length + s0 + 0.5;
     return vehicle.wreck && Boolean(overlap(entry, boxOfVehicle(vehicle)));
   });
 }
 
 function enter(game, id, kind) {
   const spec = KINDS[kind];
-  const last = game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.approach === id).sort((a, b) => a.s - b.s)[0];
+  const lane = game.lanes[id];
+  const last = game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.lane === lane).sort((a, b) => a.s - b.s)[0];
   const v0 = spec.v0 * (0.92 + game.rng() * 0.16);
   let v = v0;
   if (last) {
     const gap = last.s - KINDS[last.kind].length - spec.length;
     v = Math.min(v0, Math.max(last.v, Math.sqrt(Math.max(0, 2 * spec.b * (gap - spec.s0)))));
   }
-  game.vehicles.push({ id: game.nextId++, kind, approach: id, s: spec.length, v, v0, acc: 0, born: game.t, epoch: -1, obey: true, wreck: false });
+  game.vehicles.push({ id: game.nextId++, kind, lane, s: spec.length, v, v0, acc: 0, born: game.t, epoch: -1, obey: true, wreck: false });
 }
 
 function arrive(game) {
   const demand = demandAt(game.demo ? 90 + (game.t % 80) : game.t);
-  for (const id of IDS) {
+  for (const { id, approach } of laneList(game)) {
     while (game.next[id] <= game.t) {
-      if (game.rng() < demand[id] / PEAK_RATE) game.backlog[id].push(kindOf(game));
+      if (game.rng() < demand[approach] / PEAK_RATE) game.backlog[id].push(kindOf(game));
       game.next[id] = arrivalAfter(game, game.next[id]);
     }
     const queue = game.backlog[id];
@@ -460,14 +562,15 @@ function arrive(game) {
   }
 }
 
+export const onBoard = (game, x, y, margin = 0) => game.tiles.some((tile) => Math.abs(x - tile.x) <= BOARD + margin && Math.abs(y - tile.y) <= BOARD + margin);
+
 function retire(game) {
   game.vehicles = game.vehicles.filter((vehicle) => {
     if (vehicle.wreck) {
       const gone = vehicle.restAt !== null && game.t - vehicle.restAt > WRECK_REST + WRECK_FADE;
-      const off = Math.abs(vehicle.body.x) > BOARD + 6 || Math.abs(vehicle.body.y) > BOARD + 6;
-      return !gone && !off;
+      return !gone && onBoard(game, vehicle.body.x, vehicle.body.y, 6);
     }
-    if (vehicle.s < REACH) return true;
+    if (vehicle.s < vehicle.lane.length) return true;
     game.cleared++;
     return false;
   });
@@ -476,8 +579,8 @@ function retire(game) {
 function judge(game) {
   if (game.demo || game.over) return;
   if (game.strikes >= STRIKES) game.over = { reason: "crashes", t: game.t };
-  const jammed = IDS.find((id) => game.backlog[id].length >= GRIDLOCK);
-  if (!game.over && jammed) game.over = { reason: "gridlock", id: jammed, t: game.t };
+  const jammed = laneList(game).find((lane) => game.backlog[lane.id].length >= GRIDLOCK);
+  if (!game.over && jammed) game.over = { reason: "gridlock", id: jammed.approach, lane: jammed.id, t: game.t };
   if (game.over) pushEvent(game, { type: "over", ...game.over });
 }
 
@@ -506,51 +609,55 @@ export function advance(game, seconds) {
 export function alphaOf(game, vehicle) {
   if (vehicle.wreck) return vehicle.restAt === null ? 1 : 1 - smooth(WRECK_REST, WRECK_REST + WRECK_FADE, game.t - vehicle.restAt);
   const length = KINDS[vehicle.kind].length;
-  return Math.min(smooth(0, FADE, vehicle.s - length), smooth(0, FADE, REACH - vehicle.s));
+  return Math.min(smooth(0, FADE, vehicle.s - length), smooth(0, FADE, vehicle.lane.length - vehicle.s));
 }
 export const waitingOf = (game) =>
-  game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.v < 0.5).length + IDS.reduce((sum, id) => sum + game.backlog[id].length, 0);
-export const queueOf = (game, id) => game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.approach === id && vehicle.v < 0.5).length + game.backlog[id].length;
+  game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.v < 0.5).length + laneList(game).reduce((sum, lane) => sum + game.backlog[lane.id].length, 0);
+export const queueOf = (game, id) => game.vehicles.filter((vehicle) => !vehicle.wreck && vehicle.lane.id === id && vehicle.v < 0.5).length + game.backlog[id].length;
 
-// The box is clear when nothing is inside the stop lines and nobody on a
-// closed approach is still committed to running its line.
-export function boxClear(game) {
-  const box = { x: 0, y: 0, th: 0, hl: STOP, hw: STOP };
-  return !game.vehicles.some(
-    (vehicle) =>
-      overlap(box, boxOfVehicle(vehicle)) ||
-      (!vehicle.wreck && !game.open[vehicle.approach] && !vehicle.obey && vehicle.s < S_STOP + 0.5),
-  );
+// A tile's box is clear when nothing is inside its stop lines and nobody on
+// one of its closed approaches is still committed to running the line.
+export function boxClear(game, index) {
+  const tile = game.tiles[index];
+  const box = { x: tile.x, y: tile.y, th: 0, hl: STOP, hw: STOP };
+  return !game.vehicles.some((vehicle) => {
+    if (within(box, bodyOf(vehicle), STOP + 7) && overlap(box, boxOfVehicle(vehicle))) return true;
+    if (vehicle.wreck || vehicle.obey) return false;
+    return gateAhead(game, vehicle)?.tile === tile && !tile.open[vehicle.lane.approach];
+  });
 }
 
-// The demo plays a safe two-phase plan: green for one road, wait for the box
-// to clear, then green for the other.
+// The demo plays a safe two-phase plan at each junction: green for one road,
+// wait for the box to clear, then green for the other.
 export const GREEN = 8;
 export const ALL_RED = 1.2;
 export function autopilot(game) {
-  const pilot = (game.pilot ??= { axis: "EW", state: "green", until: GREEN, since: 0 });
   const members = (axis) => IDS.filter((id) => AXIS_OF[id] === axis);
-  if (pilot.state === "green") {
-    for (const id of IDS) if (game.open[id] !== (AXIS_OF[id] === pilot.axis)) setOpen(game, id, AXIS_OF[id] === pilot.axis);
-    if (game.t >= pilot.until) {
-      members(pilot.axis).forEach((id) => setOpen(game, id, false));
-      pilot.state = "clearing";
-      pilot.since = game.t;
+  for (const tile of game.tiles) {
+    const pilot = (tile.pilot ??= { axis: "EW", state: "green", until: game.t + GREEN, since: 0 });
+    if (pilot.state === "green") {
+      for (const id of IDS) if (tile.open[id] !== (AXIS_OF[id] === pilot.axis)) setOpen(game, tile.index, id, AXIS_OF[id] === pilot.axis);
+      if (game.t >= pilot.until) {
+        members(pilot.axis).forEach((id) => setOpen(game, tile.index, id, false));
+        pilot.state = "clearing";
+        pilot.since = game.t;
+      }
+    } else if (game.t - pilot.since >= ALL_RED && boxClear(game, tile.index)) {
+      pilot.axis = pilot.axis === "EW" ? "NS" : "EW";
+      pilot.state = "green";
+      pilot.until = game.t + GREEN;
     }
-  } else if (game.t - pilot.since >= ALL_RED && boxClear(game)) {
-    pilot.axis = pilot.axis === "EW" ? "NS" : "EW";
-    pilot.state = "green";
-    pilot.until = game.t + GREEN;
   }
 }
 
-// Puts a vehicle on an approach by hand, for tests and scripted scenes.
+// Puts a vehicle on a lane by hand, for tests and scripted scenes.
 export function place(game, id, kind, s, v = KINDS[kind].v0) {
-  const vehicle = { id: game.nextId++, kind, approach: id, s, v, v0: KINDS[kind].v0, acc: 0, born: game.t, epoch: -1, obey: true, wreck: false };
+  const vehicle = { id: game.nextId++, kind, lane: game.lanes[id], s, v, v0: KINDS[kind].v0, acc: 0, born: game.t, epoch: -1, obey: true, wreck: false };
   game.vehicles.push(vehicle);
   return vehicle;
 }
 export function quiet(game) {
-  for (const id of IDS) game.next[id] = Infinity;
+  game.quiet = true;
+  for (const id in game.next) game.next[id] = Infinity;
   return game;
 }

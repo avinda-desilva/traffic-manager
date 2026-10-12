@@ -11,8 +11,8 @@ const run = (game, seconds, each) => {
 
 test("a lone car on an open road reaches its desired speed and leaves the board", () => {
   const game = M.quiet(M.createGame());
-  M.setOpen(game, "W", true);
-  const car = M.place(game, "W", "car", 5, 0);
+  M.setOpen(game, 0, "W", true);
+  const car = M.place(game, "W0", "car", 5, 0);
   let top = 0;
   run(game, 12, () => (top = Math.max(top, car.v)));
   assert.ok(top > 9.5 && top <= 10.0001, `top speed ${top}`);
@@ -22,22 +22,22 @@ test("a lone car on an open road reaches its desired speed and leaves the board"
 
 test("a car that can stop comfortably stops a metre short of a closed gate", () => {
   const game = M.quiet(M.createGame());
-  const car = M.place(game, "N", "car", 4, 10);
+  const car = M.place(game, "N0", "car", 4, 10);
   let hardest = 0;
   run(game, 15, () => (hardest = Math.min(hardest, car.acc)));
   assert.equal(car.v, 0);
   const short = M.S_STOP - car.s;
   assert.ok(short > 0.8 && short < 1.3, `stopped ${short.toFixed(2)} m before the line`);
   assert.ok(-hardest <= M.SAFE_BRAKE, `braked at ${(-hardest).toFixed(2)} m/s²`);
-  assert.equal(M.armBlocked(game, "N"), false);
-  assert.equal(game.arm.N, 0);
+  assert.equal(M.armBlocked(game, 0, "N"), false);
+  assert.equal(game.tiles[0].arm.N, 0);
 });
 
 test("a car too close to stop at 4 m/s² runs the line when the gate closes", () => {
   const game = M.quiet(M.createGame());
-  M.setOpen(game, "E", true);
-  const car = M.place(game, "E", "car", M.S_STOP - 6, 10);
-  M.setOpen(game, "E", false);
+  M.setOpen(game, 0, "E", true);
+  const car = M.place(game, "E0", "car", M.S_STOP - 6, 10);
+  M.setOpen(game, 0, "E", false);
   M.step(game);
   assert.equal(car.obey, false);
   run(game, 3);
@@ -46,17 +46,17 @@ test("a car too close to stop at 4 m/s² runs the line when the gate closes", ()
 
 test("the arm stays up while a vehicle is under it, then comes down in 1.4 s", () => {
   const game = M.quiet(M.createGame());
-  M.setOpen(game, "S", true);
-  M.place(game, "S", "bus", M.ARM_AT + 2, 0);
-  game.arm.S = 1;
-  M.setOpen(game, "S", false);
+  M.setOpen(game, 0, "S", true);
+  M.place(game, "S0", "bus", M.ARM_AT + 2, 0);
+  game.tiles[0].arm.S = 1;
+  M.setOpen(game, 0, "S", false);
   run(game, 3);
-  assert.equal(game.arm.S, 1, "held up over the bus");
+  assert.equal(game.tiles[0].arm.S, 1, "held up over the bus");
   game.vehicles.length = 0;
   run(game, 1.0);
-  assert.ok(game.arm.S > 0 && game.arm.S < 0.5);
+  assert.ok(game.tiles[0].arm.S > 0 && game.tiles[0].arm.S < 0.5);
   run(game, 0.5);
-  assert.equal(game.arm.S, 0);
+  assert.equal(game.tiles[0].arm.S, 0);
 });
 
 test("an impulse conserves linear momentum and pushes the bodies apart", () => {
@@ -75,10 +75,10 @@ test("an impulse conserves linear momentum and pushes the bodies apart", () => {
 
 test("two open crossing roads with cars timed to meet make one crash and two wrecks", () => {
   const game = M.quiet(M.createGame());
-  M.setOpen(game, "W", true);
-  M.setOpen(game, "N", true);
-  const a = M.place(game, "W", "car", M.S_STOP - 2, 10);
-  const b = M.place(game, "N", "car", M.S_STOP - 2, 10);
+  M.setOpen(game, 0, "W", true);
+  M.setOpen(game, 0, "N", true);
+  const a = M.place(game, "W0", "car", M.S_STOP - 2, 10);
+  const b = M.place(game, "N0", "car", M.S_STOP - 2, 10);
   run(game, 4);
   assert.equal(game.strikes, 1);
   assert.ok(a.wreck && b.wreck);
@@ -89,13 +89,13 @@ test("two open crossing roads with cars timed to meet make one crash and two wre
 
 test("cars queue behind a wreck instead of driving into it", () => {
   const game = M.quiet(M.createGame());
-  M.setOpen(game, "W", true);
-  const wreck = M.place(game, "W", "car", M.BOARD + 2, 0);
+  M.setOpen(game, 0, "W", true);
+  const wreck = M.place(game, "W0", "car", M.BOARD + 2, 0);
   wreck.body = M.bodyOf(wreck);
   wreck.wreck = true;
   wreck.wreckAt = -10;
   wreck.restAt = null;
-  const car = M.place(game, "W", "car", 4, 10);
+  const car = M.place(game, "W0", "car", 4, 10);
   run(game, 6);
   assert.equal(car.wreck, false);
   assert.equal(game.strikes, 0);
@@ -104,11 +104,11 @@ test("cars queue behind a wreck instead of driving into it", () => {
 test("a four-way standoff in the box clears instead of locking up", () => {
   const game = M.quiet(M.createGame());
   for (const id of M.IDS) {
-    M.setOpen(game, id, true);
-    M.place(game, id, "car", M.S_STOP + 1, 2);
+    M.setOpen(game, 0, id, true);
+    M.place(game, `${id}0`, "car", M.S_STOP + 1, 2);
   }
   run(game, 30);
-  assert.ok(M.boxClear(game), "the box emptied");
+  assert.ok(M.boxClear(game, 0), "the box emptied");
   assert.equal(game.vehicles.length, 0);
 });
 
@@ -132,4 +132,42 @@ test("the same seed plays the same shift", () => {
     return [game.cleared, game.vehicles.length, game.vehicles.map((v) => v.s.toFixed(6)).join()];
   };
   assert.deepEqual(play(), play());
+});
+
+test("a car crosses into the next tile and stops a metre short of its shut gate", () => {
+  const game = M.quiet(M.createGame());
+  M.addTile(game);
+  M.setOpen(game, 0, "W", true);
+  const car = M.place(game, "W0", "car", 5, 10);
+  run(game, 20);
+  assert.equal(car.v, 0);
+  const short = M.S_STOP + M.PITCH - car.s;
+  assert.ok(short > 0.8 && short < 1.3, `stopped ${short.toFixed(2)} m before tile 2's line`);
+  assert.equal(game.cleared, 0);
+  M.setOpen(game, 1, "W", true);
+  run(game, 12);
+  assert.equal(game.cleared, 1, "counted once, when it leaves the board");
+  assert.equal(game.vehicles.length, 0);
+});
+
+test("adding tiles keeps every vehicle where it is on the board", () => {
+  const game = M.quiet(M.createGame());
+  for (const id of M.IDS) M.place(game, `${id}0`, "car", 20, 0);
+  const where = () => game.vehicles.map((vehicle) => M.bodyOf(vehicle)).map(({ x, y }) => [x.toFixed(9), y.toFixed(9)].join());
+  const before = where();
+  M.addTile(game);
+  M.addTile(game);
+  assert.deepEqual(where(), before);
+  assert.equal(game.lanes.E0.tiles.join(), "1,0", "the westbound lane now enters on the east tile");
+  assert.equal(game.lanes.S0.tiles.join(), "2,0", "the northbound lane now enters on the south tile");
+  assert.equal(game.lanes.W0.length, M.REACH + M.PITCH);
+  assert.ok(game.lanes.W1 && game.lanes.E1, "the new row has its own lanes");
+});
+
+test("a safe plan at every junction of a 2×2 board runs five minutes without a crash", () => {
+  const game = M.createGame({ seed: 11, demo: true });
+  for (let index = 0; index < 3; index++) M.addTile(game);
+  run(game, 300);
+  assert.equal(game.strikes, 0);
+  assert.ok(game.cleared > 80, `cleared ${game.cleared}`);
 });
