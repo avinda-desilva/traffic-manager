@@ -13,7 +13,6 @@ const announcer = document.querySelector(".tm-live");
 const pips = [...svg.querySelectorAll(".tm-pip")];
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 const BEST_KEY = "traffic-manager-best";
-const KEYS = { ArrowLeft: "W", ArrowUp: "N", ArrowRight: "E", ArrowDown: "S", 1: "W", 2: "N", 3: "E", 4: "S" };
 const NAMES = Object.fromEntries(M.APPROACHES.map((approach) => [approach.id, approach.name]));
 
 const readBest = () => {
@@ -40,7 +39,6 @@ let carry = 0;
 let visible = false;
 let order = [];
 const fx = [];
-const lever = Object.fromEntries(M.IDS.map((id) => [id, 0]));
 
 const items = new Map();
 for (const el of sortedLayer.querySelectorAll("[data-item]")) {
@@ -52,7 +50,6 @@ const drawn = new Map();
 function demo() {
   game = M.createGame({ seed: DATA.demoSeed, demo: true });
   M.advance(game, DATA.demoLead);
-  for (const id of M.IDS) lever[id] = game.tiles[0].open[id] ? 1 : 0;
   mode = "demo";
 }
 
@@ -116,11 +113,9 @@ function syncVehicles() {
   }
 }
 
-function syncGates(dt) {
+function syncGates() {
   const tile = game.tiles[0];
   for (const id of M.IDS) {
-    const target = tile.open[id] ? 1 : 0;
-    lever[id] = still.matches ? target : target > lever[id] ? Math.min(1, lever[id] + dt / 0.35) : Math.max(0, lever[id] - dt / 0.35);
     const entry = items.get(`gate-${id}`);
     const share = tile.arm[id];
     const sign = `${share.toFixed(4)}|${tile.open[id]}|${selected === id}`;
@@ -129,15 +124,11 @@ function syncGates(dt) {
     entry.box = PARTS.gateBox(id, share);
     entry.sign = sign;
   }
-  const entry = items.get("frame");
-  const shares = M.IDS.map((id) => lever[id]);
-  const go = M.IDS.map((id) => tile.open[id]);
-  const lit = M.IDS.indexOf(selected);
-  const strikes = mode === "demo" ? 0 : game.strikes;
-  const sign = `${shares.map((share) => share.toFixed(3)).join()}|${go.join()}|${lit}|${strikes}`;
-  if (entry.sign !== sign) {
-    entry.el.innerHTML = PARTS.frameSvg(shares, P, { go, lit, strikes });
-    entry.sign = sign;
+  const board = items.get("strikes");
+  const strikes = mode === "demo" ? 0 : Math.min(M.STRIKES, game.strikes);
+  if (board.sign !== strikes) {
+    board.el.innerHTML = PARTS.strikeBoardSvg(strikes, P);
+    board.sign = strikes;
   }
   for (const pip of pips) {
     const lane = `${pip.dataset.approach}0`;
@@ -198,20 +189,22 @@ function handleEvents(now) {
 
 const overText = () => `${M.STRIKES} strikes · ${game.cleared} through`;
 
+const HELP = "Tap a road to swing its gate · Space shuts all";
+
 function words() {
   if (mode === "demo") return [`demo · ${game.cleared} through`, "Tap or press Space to start a shift"];
   if (mode === "over") return [`${overText()} · best ${best}`, "Tap or press Space for a new shift"];
-  if (paused) return ["paused · P to resume", "Tap a road · ← ↑ → ↓ · Space shuts all"];
+  if (paused) return ["paused · P to resume", HELP];
   const [jam] = M.jamsOf(game);
-  if (jam) return [`${NAMES[jam.approach]} road jammed · strike in ${Math.ceil(game.jam[jam.id].left)} s`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
-  if (selected) return [`${NAMES[selected]} gate ${game.tiles[0].open[selected] ? "open" : "shut"} · ${M.queueOf(game, `${selected}0`)} waiting`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
-  return [`${game.cleared} through · ${game.strikes}/${M.STRIKES} strikes · ${M.waitingOf(game)} waiting`, "Tap a road · ← ↑ → ↓ · Space shuts all"];
+  if (jam) return [`${NAMES[jam.approach]} road jammed · strike in ${Math.ceil(game.jam[jam.id].left)} s`, HELP];
+  if (selected) return [`${NAMES[selected]} gate ${game.tiles[0].open[selected] ? "open" : "shut"} · ${M.queueOf(game, `${selected}0`)} waiting`, HELP];
+  return [`${game.cleared} through · ${game.strikes}/${M.STRIKES} strikes · ${M.waitingOf(game)} waiting`, HELP];
 }
 
 function render(now, dt) {
   handleEvents(now);
   syncVehicles();
-  syncGates(dt);
+  syncGates();
   sortLayer();
   drawFx(now);
   const [text, help] = words();
@@ -254,12 +247,12 @@ function pointerAt(event) {
   return point.matrixTransform(svg.getScreenCTM().inverse());
 }
 
+// Only the roads take a tap: the arm of the road a pointer is over names the
+// gate on it. The box in the middle, the gate cabinets standing over the
+// asphalt and everything off it do nothing.
 function approachAt(event) {
+  if (event.target.closest?.(".tm-cabinet")) return null;
   const { x: sx, y: sy } = pointerAt(event);
-  for (const target of DATA.levers) {
-    const [x0, y0, x1, y1] = target.rect;
-    if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) return target.id;
-  }
   const { sinA, cosA, sinE, k: scale } = k.cameraOf(P);
   const p = (sx - P.origin[0]) / scale;
   const q = (sy - P.origin[1]) / (sinE * scale);
@@ -269,16 +262,7 @@ function approachAt(event) {
   if (Math.abs(x) > edge || Math.abs(y) > edge) return null;
   if (Math.abs(y) <= DATA.road) return x < -DATA.road ? "W" : x > DATA.road ? "E" : null;
   if (Math.abs(x) <= DATA.road) return y < -DATA.road ? "N" : y > DATA.road ? "S" : null;
-  let nearest = null;
-  let reach = 16;
-  for (const [id, [gx, gy]] of Object.entries(DATA.gates)) {
-    const distance = Math.hypot(x - gx, y - gy);
-    if (distance < reach) {
-      reach = distance;
-      nearest = id;
-    }
-  }
-  return nearest;
+  return null;
 }
 
 function act(id) {
@@ -296,12 +280,6 @@ stage.addEventListener("pointerdown", (event) => {
   act(approachAt(event));
 });
 stage.addEventListener("keydown", (event) => {
-  const id = KEYS[event.key];
-  if (id) {
-    event.preventDefault();
-    act(id);
-    return;
-  }
   if (event.key === " " || event.key === "Enter") {
     event.preventDefault();
     if (mode !== "play") act(null);

@@ -32,7 +32,7 @@ const item = (key, svg, box) => ({ key, svg, box });
 const items = [
   ...SCENE.props().map((prop) => item(prop.key, prop.svg, prop.box)),
   ...M.IDS.map((id) => item(`gate-${id}`, PARTS.gateSvg(id, demo.tiles[0].arm[id], P, { go: demo.tiles[0].open[id] }), PARTS.gateBox(id, demo.tiles[0].arm[id]))),
-  item("frame", PARTS.frameSvg(M.IDS.map((id) => (demo.tiles[0].open[id] ? 1 : 0)), P, { go: M.IDS.map((id) => demo.tiles[0].open[id]) }), SCENE.frameBox()),
+  item("strikes", PARTS.strikeBoardSvg(0, P), PARTS.strikeBoardBox()),
   ...demo.vehicles.map((vehicle) => {
     const body = M.bodyOf(vehicle);
     const [x, y] = [body.x * PARTS.U, body.y * PARTS.U];
@@ -46,7 +46,7 @@ const sorted = SCENE.paintOrder(items, P)
   .join("");
 
 const LABEL =
-  "A model crossroads on a base plate. Two roads cross between four kerbed islands; a boom gate with a red or green lamp stands at each stop line, and a lever frame on the near island has one lever per gate. Cars, vans and buses drive through when their gate is open and queue when it is shut.";
+  "A model crossroads on a base plate. Two roads cross between four kerbed islands; a boom gate with a red or green lamp stands at each stop line, and a signal controller cabinet on the near island carries three strike lamps. Cars, vans and buses drive through when their gate is open and queue when it is shut.";
 
 const figure = k.figureSvg({
   width: SCENE.WIDTH,
@@ -70,13 +70,13 @@ const body = k.plateHtml({
   hint: "Tap or press Space to start a shift",
   readout: `demo · ${demo.cleared} through`,
   keys: [
-    { mark: "lit", label: "The gate and lever you are pointing at" },
+    { mark: "lit", label: "The gate on the road you are pointing at" },
     { mark: "green", label: "Lamp green: gate open" },
     { mark: "red", label: "Lamp red: gate shut, strike lamps lit" },
     { mark: "raised", label: "Car 4.5 m, van 5.4 m, bus 11.5 m" },
   ],
   caption,
-  body: `<div class="tm-stage" tabindex="0" role="application" aria-roledescription="game" aria-label="Traffic manager. Arrow keys or 1 to 4 open and shut the west, north, east and south gates. Space starts a shift or shuts every gate. P pauses.">${figure}</div><p class="tm-live" aria-live="polite"></p>`,
+  body: `<div class="tm-stage" tabindex="0" role="application" aria-roledescription="game" aria-label="Traffic manager. Tap a road to open or shut the gate on it. Space starts a shift or shuts every gate. P pauses.">${figure}</div><p class="tm-live" aria-live="polite"></p>`,
 });
 
 const CSS = `
@@ -108,8 +108,6 @@ const data = {
   demoLead: DEMO_LEAD,
   board: SCENE.B,
   road: SCENE.R,
-  levers: SCENE.leverTargets(),
-  gates: SCENE.gatePivots(),
 };
 
 const script = [

@@ -41,7 +41,9 @@ const TREES = [
   [96, -64, 1],
   [100, -100, 0.75],
   [106, 106, 0.8],
+  [104, 50, 0.85],
 ];
+const PIT = { x: 72.5, y: 90, w: 9, d: 9, r: 0.8 };
 
 export const P = k.fitProjection(
   [...k.boxCorners(PLATE, -PLATE_H - FOOT_H, 0), ...k.boxCorners(SHOP, 0, SHOP_TOP + 8)],
@@ -200,6 +202,22 @@ function island(sx, sy) {
   out.push(L(k.onTop(bed, PLOT_Z, P, true), { tone: "faint" }));
   if (lot) out.push(bays());
   if (sx > 0 && sy < 0) out.push(S(k.slabOf(PATH, PLOT_Z, 0.1, P, 4), { tone: "lo", flat: true, className: "tm-paint" }));
+  if (sx > 0 && sy > 0) out.push(drawPit());
+  return out.join("");
+}
+
+// The cable pit in front of the signal controller: a lifting cover with two key
+// holes, and a run of duct covers from the pit to the cabinet's plinth.
+function drawPit() {
+  const out = [S(k.slabOf(PIT, PLOT_Z, 0.3, P, 2, 0.1), { tone: "lo" })];
+  const top = PLOT_Z + 0.3;
+  out.push(L(k.planOutline(k.insetPlan(PIT, 1.1), top, P, 2), { tone: "faint" }));
+  out.push(k.dotsSvg([at([PIT.x + 2.6, PIT.y + PIT.d / 2, top]), at([PIT.x + PIT.w - 2.6, PIT.y + PIT.d / 2, top])], { size: 0.4, tone: "lo" }));
+  const x = PIT.x + PIT.w / 2 - 1.5;
+  const from = PARTS.strikeBoardBox()[3];
+  const to = PIT.y;
+  const step = (to - from) / 3;
+  for (let index = 0; index < 3; index++) out.push(S(k.slabOf({ x, y: from + index * step + 0.15, w: 3, d: step - 0.3, r: 0.3 }, PLOT_Z, 0.2, P, 2), { tone: "lo", flat: true }));
   return out.join("");
 }
 
@@ -387,16 +405,3 @@ export function paintOrder(items, P0) {
     .forEach(([, index]) => visit(index));
   return out;
 }
-
-// Where a pointer may grab each lever: the screen box it sweeps.
-export function leverTargets() {
-  return PARTS.LEVER_X.map((x, index) => {
-    const points = [[x, PARTS.LEVER_PIVOT[0], PARTS.LEVER_PIVOT[1]], PARTS.leverTip(index, 0), PARTS.leverTip(index, 1)].map(at);
-    const xs = points.map(([px]) => px);
-    const ys = points.map(([, py]) => py);
-    return { id: M.IDS[index], rect: [Math.min(...xs) - 3, Math.min(...ys) - 3, Math.max(...xs) + 3, Math.max(...ys) + 2] };
-  });
-}
-
-export const gatePivots = () => Object.fromEntries(M.IDS.map((id) => [id, (([x0, x1, y0, y1]) => [(x0 + x1) / 2, (y0 + y1) / 2])(PARTS.gateBox(id, 1))]));
-export const frameBox = () => PARTS.frameBox();

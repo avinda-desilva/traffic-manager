@@ -1,5 +1,5 @@
-// Parts that move: vehicles, the four boom gates and the lever frame. Built by
-// the Node build for the first frame and rebuilt in the page as they move.
+// Parts that move or change: vehicles, the boom gates and the strike lamps.
+// Built by the Node build for the first frame and rebuilt in the page.
 import * as k from "../vendor/anatomy/kit/iso-kit.mjs";
 import * as G from "../vendor/anatomy/kit/lathe.mjs";
 import * as M from "./model.mjs";
@@ -148,7 +148,7 @@ function cabinetSvg(id, P, { go }) {
   out.push(k.solidSvg(k.cylinder(centre[0], centre[1], 1.25, CABINET_TOP, 0.9, P, 20), { tone: "mid" }));
   out.push(`<path class="tm-glow" d="${k.ring(centre[0], centre[1], 2.6, CABINET_TOP + 0.9, P, 24)}"${go ? " data-go" : ""}/>`);
   out.push(`<path class="tm-lamp" d="${k.ring(centre[0], centre[1], 0.95, CABINET_TOP + 0.9, P, 20)}"${go ? " data-go" : ""}/>`);
-  return out.join("");
+  return `<g class="tm-cabinet">${out.join("")}</g>`;
 }
 
 function hubSvg(id, P) {
@@ -187,68 +187,59 @@ export function gateBox(id, share) {
   return [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), 0, Math.max(CABINET_TOP + 1, ...zs)];
 }
 
-// The lever frame on the near kerb: one lever per gate, pulled toward you to
-// open it, with a repeater lamp behind each lever and three crash lamps.
-export const FRAME = { x: 56, y: 70, w: 48, d: 14, r: 1.5, z: ISLAND_H, h: 6 };
-export const LEVER_X = [62, 72, 82, 92];
-export const LEVER_PIVOT = [77, FRAME.z + FRAME.h - 1.1];
-export const LEVER_LEN = 16;
-export const LEVER_TILT = 0.26;
-const SHELF = { x: 56, y: 63.5, w: 40, d: 5, r: 0.8 };
-const SHELF_H = 10;
-const STRIKE_AT = [
-  [99.6, 73.6],
-  [99.6, 77],
-  [99.6, 80.4],
-];
+// The signal controller on the near island: a cabinet on a concrete plinth,
+// two doors with louvres and handles on the faces you can see, a lid, and a
+// lamp bar with the three strike lamps. A strike is a crash or a jam.
+export const CABINET = { x: 64, y: 68, w: 26, d: 10, r: 0.8 };
+const CABINET_Z = ISLAND_H + 0.8;
+const CABINET_H = 12;
+const PLINTH = { x: 61.5, y: 65.5, w: 31, d: 15, r: 1 };
+const LID_Z = CABINET_Z + 1.4 + CABINET_H;
+export const STRIKE_LAMPS = [70, 77, 84];
 
-const leverFrame = (index, share) => {
-  const tilt = -LEVER_TILT + 2 * LEVER_TILT * M.smooth(0, 1, share);
-  const along = [0, Math.sin(tilt), Math.cos(tilt)];
-  return G.frameOf([LEVER_X[index], LEVER_PIVOT[0], LEVER_PIVOT[1]], along, [1, 0, 0], G.cross3(along, [1, 0, 0]));
-};
-
-export function leverTip(index, share) {
-  return G.pointOf(leverFrame(index, share), LEVER_LEN + 1, 0, 0);
-}
-
-export function frameSvg(shares, P, { go = [], lit = -1, strikes = 0 } = {}) {
+export function strikeBoardSvg(strikes, P) {
   const out = [];
-  const top = FRAME.z + FRAME.h;
-  out.push(`<path class="iso-halo" d="${k.haloOf({ x: SHELF.x, y: SHELF.y, w: FRAME.w, d: FRAME.y + FRAME.d - SHELF.y, r: 2 }, FRAME.z, 0.1, P)}"/>`);
-  out.push(k.solidSvg(k.slabOf(SHELF, FRAME.z, SHELF_H, P, 3, 0.5), { tone: "mid", inner: k.lineSvg(k.sideSeam(SHELF, FRAME.z + 3, P, 3), { tone: "faint" }) }));
-  LEVER_X.forEach((x, index) => {
-    out.push(k.solidSvg(k.cylinder(x, SHELF.y + 2.5, 1.2, FRAME.z + SHELF_H, 0.8, P, 18), { tone: "mid" }));
-    out.push(`<path class="tm-lamp" d="${k.ring(x, SHELF.y + 2.5, 0.85, FRAME.z + SHELF_H + 0.8, P, 16)}"${go[index] ? " data-go" : ""}/>`);
-  });
-  out.push(k.solidSvg(k.slabOf(FRAME, FRAME.z, FRAME.h, P, 4, 0.6), { tone: "mid", inner: k.lineSvg(k.sideSeam(FRAME, FRAME.z + 1.6, P, 4), { tone: "faint" }) }));
-  out.push(k.lineSvg(k.planOutline(k.insetPlan(FRAME, 1.6), top, P, 3), { tone: "faint" }));
-  LEVER_X.forEach((x) => out.push(k.lineSvg(k.planOutline({ x: x - 1, y: 72.5, w: 2, d: 9, r: 0.9 }, top, P, 3), { tone: "lo" })));
-  const screws = k.corners(FRAME, 2.6).map(([x, y]) => k.iso([x, y, top], P));
-  out.push(k.dotsSvg(screws, { size: 0.45 }));
-  STRIKE_AT.forEach(([x, y], index) => {
-    out.push(k.solidSvg(k.cylinder(x, y, 1.3, top, 0.7, P, 18), { tone: "mid" }));
-    out.push(`<path class="tm-strike" d="${k.ring(x, y, 0.9, top + 0.7, P, 16)}"${index < strikes ? " data-on" : ""}/>`);
-  });
-  const V = G.viewOf(P);
-  shares.forEach((share, index) => {
-    const F = leverFrame(index, share);
-    const box = (hx, hy) => [
-      [-hx, -hy],
-      [hx, -hy],
-      [hx, hy],
-      [-hx, hy],
-    ];
-    const latch = { ...F, o: G.add3(F.o, G.mul3(F.v, 0.75)) };
-    const parts = [
-      { paths: G.prismOf(F, box(0.45, 0.35), 1.2, LEVER_LEN, P), at: G.pointOf(F, 8, 0, 0), tone: "hi" },
-      { paths: G.prismOf(F, box(0.6, 0.55), LEVER_LEN, LEVER_LEN + 2.6, P), at: G.pointOf(F, LEVER_LEN + 1.3, 0, 0), tone: "hi" },
-      { paths: G.prismOf(latch, box(0.3, 0.3), LEVER_LEN - 4.5, LEVER_LEN - 1.2, P), at: G.pointOf(latch, LEVER_LEN - 3, 0, 0), tone: "mid" },
-    ];
-    parts.sort((a, b) => G.dot3(a.at, V) - G.dot3(b.at, V));
-    for (const part of parts) out.push(k.solidSvg(part.paths, { tone: part.tone, lit: index === lit && part.tone === "hi" }));
+  const at = (point) => k.iso(point, P);
+  const plinthTop = CABINET_Z + 1.4;
+  out.push(`<path class="iso-halo" d="${k.haloOf(k.insetPlan(PLINTH, -1.2), CABINET_Z, 0.1, P)}"/>`);
+  out.push(k.solidSvg(k.slabOf(PLINTH, CABINET_Z, 1.4, P, 3, 0.4), { tone: "lo" }));
+  out.push(k.lineSvg(k.planOutline(k.insetPlan(PLINTH, 1), plinthTop, P, 3), { tone: "faint" }));
+  out.push(k.dotsSvg(k.corners(PLINTH, 1.6).map(([x, y]) => at([x, y, plinthTop])), { size: 0.4, tone: "lo" }));
+  out.push(k.solidSvg(k.slabOf(CABINET, plinthTop, CABINET_H, P, 3, 0.4), { tone: "mid", inner: k.lineSvg(k.sideSeam(CABINET, plinthTop + 1.2, P, 3), { tone: "faint" }) }));
+  const faceY = CABINET.y + CABINET.d;
+  const faceX = CABINET.x + CABINET.w;
+  const onY = (x, z) => at([x, faceY, z]);
+  const onX = (y, z) => at([faceX, y, z]);
+  const rect = (map, a0, a1, z0, z1) => k.pathOf([map(a0, z0), map(a1, z0), map(a1, z1), map(a0, z1)], true);
+  const z0 = plinthTop + 2;
+  const z1 = plinthTop + CABINET_H - 1.4;
+  const doors = [];
+  const louvres = [];
+  const handles = [];
+  for (const [a0, a1] of [
+    [CABINET.x + 1.2, CABINET.x + CABINET.w / 2 - 0.4],
+    [CABINET.x + CABINET.w / 2 + 0.4, CABINET.x + CABINET.w - 1.2],
+  ]) {
+    doors.push(rect(onY, a0, a1, z0, z1));
+    for (let index = 0; index < 4; index++) louvres.push(rect(onY, a0 + 2, a1 - 2, z1 - 2.2 - index * 1.4, z1 - 1.6 - index * 1.4));
+    handles.push(onY(a0 === CABINET.x + 1.2 ? a1 - 1.4 : a0 + 1.4, (z0 + z1) / 2 - 1));
+  }
+  doors.push(rect(onX, CABINET.y + 1.2, CABINET.y + CABINET.d - 1.2, z0, z1));
+  for (let index = 0; index < 4; index++) louvres.push(rect(onX, CABINET.y + 2.6, CABINET.y + CABINET.d - 2.6, z1 - 2.2 - index * 1.4, z1 - 1.6 - index * 1.4));
+  out.push(k.lineSvg(doors.join(""), { tone: "lo" }), k.lineSvg(louvres.join(""), { tone: "faint" }), k.dotsSvg(handles, { size: 0.5, tone: "mid" }));
+  const lid = k.insetPlan(CABINET, -0.8);
+  out.push(k.solidSvg(k.slabOf(lid, LID_Z, 1.2, P, 3, 0.4), { tone: "mid" }));
+  const top = LID_Z + 1.2;
+  const bar = { x: 66, y: 70.4, w: 22, d: 5.2, r: 1.2 };
+  out.push(k.lineSvg(k.planOutline(k.insetPlan(lid, 1.4), top, P, 3), { tone: "faint" }));
+  out.push(k.solidSvg(k.slabOf(bar, top, 1.4, P, 4, 0.4), { tone: "mid" }));
+  out.push(k.dotsSvg([at([bar.x + 1.4, bar.y + bar.d / 2, top + 1.4]), at([bar.x + bar.w - 1.4, bar.y + bar.d / 2, top + 1.4])], { size: 0.4 }));
+  STRIKE_LAMPS.forEach((x, index) => {
+    const y = bar.y + bar.d / 2;
+    out.push(k.solidSvg(k.cylinder(x, y, 1.8, top + 1.4, 0.9, P, 20), { tone: "mid" }));
+    out.push(`<path class="tm-strike" d="${k.ring(x, y, 1.25, top + 2.3, P, 18)}"${index < strikes ? " data-on" : ""}/>`);
   });
   return out.join("");
 }
 
-export const frameBox = () => [SHELF.x, FRAME.x + FRAME.w, SHELF.y, FRAME.y + FRAME.d, 0, LEVER_PIVOT[1] + LEVER_LEN + 3];
+export const strikeBoardBox = () => [PLINTH.x, PLINTH.x + PLINTH.w, PLINTH.y, PLINTH.y + PLINTH.d, 0, LID_Z + 1.2 + 2.3];
